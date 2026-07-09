@@ -24,11 +24,26 @@ scene.fog = new THREE.Fog(0x2fb9dc, 30, 120);
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 400);
 
-window.addEventListener('resize', () => {
+function onResize() {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
-});
+}
+window.addEventListener('resize', onResize);
+if (window.visualViewport) window.visualViewport.addEventListener('resize', onResize);
+
+// iOS Safari ignores user-scalable=no, so block pinch and double-tap zoom by hand
+for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) {
+  document.addEventListener(ev, e => e.preventDefault());
+}
+document.addEventListener('dblclick', e => e.preventDefault());
+let lastTapTime = 0;
+document.addEventListener('touchend', e => {
+  const now = performance.now();
+  // double-tap: swallow the second tap unless it's on a button (keep taps working)
+  if (now - lastTapTime < 350 && !e.target.closest('button')) e.preventDefault();
+  lastTapTime = now;
+}, { passive: false });
 
 // lights: bright sunny lagoon
 scene.add(new THREE.HemisphereLight(0xe0fbff, 0x3e9db6, 1.25));
@@ -290,26 +305,65 @@ function addBlush(g, x, y, z, size = 0.16) {
   }
 }
 
+// ----------------------------- smooth curvy fins -----------------------------
+// extruded 2D shapes with rounded bevels, so tails look like real cute fishtails
+function finMesh(shapeFn, color, size) {
+  const shape = new THREE.Shape();
+  shapeFn(shape);
+  const geo = new THREE.ExtrudeGeometry(shape, {
+    depth: 0.12, curveSegments: 16,
+    bevelEnabled: true, bevelThickness: 0.06, bevelSize: 0.06, bevelSegments: 3,
+  });
+  geo.translate(0, 0, -0.06); // center the thickness
+  const m = new THREE.Mesh(geo, mat(color));
+  m.scale.setScalar(size);
+  return m;
+}
+// classic forked tail: two rounded lobes with a notch between them
+function makeTailFin(color, size = 1) {
+  return finMesh(s => {
+    s.moveTo(0, 0);
+    s.bezierCurveTo(-0.35, 0.45, -0.7, 0.85, -1.05, 1.0);
+    s.quadraticCurveTo(-0.7, 0.42, -0.6, 0);
+    s.quadraticCurveTo(-0.7, -0.42, -1.05, -1.0);
+    s.bezierCurveTo(-0.7, -0.85, -0.35, -0.45, 0, 0);
+  }, color, size);
+}
+// rounded dorsal fin swept gently back
+function makeDorsalFin(color, size = 1) {
+  return finMesh(s => {
+    s.moveTo(0.25, 0);
+    s.quadraticCurveTo(0.3, 0.55, -0.05, 0.9);
+    s.quadraticCurveTo(-0.5, 0.6, -0.6, 0);
+    s.lineTo(0.25, 0);
+  }, color, size);
+}
+// soft teardrop pectoral fin sweeping back and down
+function makeSideFin(color, size = 1) {
+  return finMesh(s => {
+    s.moveTo(0, 0);
+    s.quadraticCurveTo(0.2, -0.45, -0.15, -0.85);
+    s.quadraticCurveTo(-0.5, -0.5, -0.45, -0.05);
+    s.quadraticCurveTo(-0.2, 0.08, 0, 0);
+  }, color, size);
+}
+
 // ----------------------------- the player fish -----------------------------
 function makeFish(bodyColor, finColor, size = 1) {
   const g = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 16), mat(bodyColor));
+  const body = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 18), mat(bodyColor));
   body.scale.set(1.4, 0.9, 0.7);
   g.add(body);
-  const tail = new THREE.Mesh(new THREE.ConeGeometry(0.55, 1.1, 4), mat(finColor));
-  tail.rotation.z = Math.PI / 2;
-  tail.scale.z = 0.3;
-  tail.position.x = -1.7;
+  const tail = makeTailFin(finColor, 0.75);
+  tail.position.x = -1.3;
   g.add(tail);
-  const topFin = new THREE.Mesh(new THREE.ConeGeometry(0.35, 0.8, 4), mat(finColor));
-  topFin.position.set(-0.1, 0.95, 0);
-  topFin.scale.z = 0.3;
+  const topFin = makeDorsalFin(finColor, 0.55);
+  topFin.position.set(0.1, 0.8, 0);
   g.add(topFin);
   for (const side of [-1, 1]) {
-    const fin = new THREE.Mesh(new THREE.ConeGeometry(0.25, 0.7, 4), mat(finColor));
-    fin.position.set(0.15, -0.1, side * 0.7);
-    fin.rotation.x = side * Math.PI / 2.4;
-    fin.scale.z = 0.3;
+    const fin = makeSideFin(finColor, 0.75);
+    fin.position.set(0.35, -0.15, side * 0.6);
+    fin.rotation.x = -side * 0.8; // flare outward from the body
     g.add(fin);
     addKawaiiEye(g, 0.85, 0.3, side * 0.45, 0.28);
   }
@@ -382,20 +436,16 @@ function makeShark() {
   belly.scale.set(2.45, 0.95, 0.85);
   belly.position.y = -0.28;
   g.add(belly);
-  const tail = new THREE.Mesh(new THREE.ConeGeometry(0.9, 1.6, 4), mat(grey));
-  tail.rotation.z = Math.PI / 2;
-  tail.scale.z = 0.25;
-  tail.position.x = -3.1;
+  const tail = makeTailFin(grey, 1.45);
+  tail.position.x = -2.55;
   g.add(tail);
-  const dorsal = new THREE.Mesh(new THREE.ConeGeometry(0.6, 1.3, 4), mat(grey));
-  dorsal.position.set(-0.2, 1.3, 0);
-  dorsal.scale.z = 0.25;
+  const dorsal = makeDorsalFin(grey, 1.05);
+  dorsal.position.set(-0.2, 1.0, 0);
   g.add(dorsal);
   for (const side of [-1, 1]) {
-    const fin = new THREE.Mesh(new THREE.ConeGeometry(0.45, 1.2, 4), mat(grey));
-    fin.position.set(0.4, -0.4, side * 0.9);
-    fin.rotation.x = side * Math.PI / 2.1;
-    fin.scale.z = 0.25;
+    const fin = makeSideFin(grey, 1.35);
+    fin.position.set(0.55, -0.5, side * 0.75);
+    fin.rotation.x = -side * 0.9; // flare outward from the body
     g.add(fin);
     addKawaiiEye(g, 1.7, 0.4, side * 0.58, 0.3);
   }
