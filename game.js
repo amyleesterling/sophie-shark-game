@@ -12,13 +12,15 @@ const FLOOR_Y = 0;
 const CEILING_Y = 26;
 
 const canvas = document.getElementById('game');
+const isTouchDevice = window.matchMedia('(pointer: coarse)').matches;
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+// phones get a lower pixel-ratio cap so the reef stays smooth
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, isTouchDevice ? 1.5 : 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x1a6fb5);
-scene.fog = new THREE.Fog(0x1a6fb5, 30, 120);
+scene.background = new THREE.Color(0x2fb9dc); // bright tropical lagoon water
+scene.fog = new THREE.Fog(0x2fb9dc, 30, 120);
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 400);
 
@@ -28,9 +30,9 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// lights: soft blue underwater world
-scene.add(new THREE.HemisphereLight(0xbfe8ff, 0x1d4e79, 1.1));
-const sun = new THREE.DirectionalLight(0xffffff, 1.4);
+// lights: bright sunny lagoon
+scene.add(new THREE.HemisphereLight(0xe0fbff, 0x3e9db6, 1.25));
+const sun = new THREE.DirectionalLight(0xfff3d6, 1.5);
 sun.position.set(30, 60, 10);
 scene.add(sun);
 
@@ -75,7 +77,7 @@ const sfx = {
     pos.setZ(i, Math.sin(pos.getX(i) * 0.15) * Math.cos(pos.getY(i) * 0.15) * 0.8);
   }
   sandGeo.computeVertexNormals();
-  const sand = new THREE.Mesh(sandGeo, mat(0xe8d8a0, { roughness: 1 }));
+  const sand = new THREE.Mesh(sandGeo, mat(0xf9e9b6, { roughness: 1 }));
   sand.rotation.x = -Math.PI / 2;
   sand.position.y = FLOOR_Y;
   scene.add(sand);
@@ -89,14 +91,18 @@ const sfx = {
   surface.position.y = CEILING_Y + 4;
   scene.add(surface);
 
-  // scattered pebbles and starfish for cuteness
-  for (let i = 0; i < 40; i++) {
-    const pebble = new THREE.Mesh(new THREE.SphereGeometry(rand(0.3, 0.9), 8, 6), mat(0xc9b98a));
+  // scattered candy-colored pebbles and starfish for cuteness
+  const pebbleColors = [0xffc6d9, 0xc5b3ff, 0xaee9ff, 0xffe3a3, 0xc8f7c5, 0xf6d4ff];
+  for (let i = 0; i < 50; i++) {
+    const pebble = new THREE.Mesh(
+      new THREE.SphereGeometry(rand(0.3, 0.9), 8, 6),
+      mat(pebbleColors[i % pebbleColors.length])
+    );
     pebble.position.set(rand(-95, 95), 0.2, rand(-95, 95));
     pebble.scale.y = 0.5;
     scene.add(pebble);
   }
-  for (let i = 0; i < 12; i++) {
+  for (let i = 0; i < 16; i++) {
     const star = new THREE.Group();
     const c = [0xff8fab, 0xffa94d, 0xff6b6b][i % 3];
     for (let a = 0; a < 5; a++) {
@@ -189,6 +195,62 @@ function makeCoralCluster(x, z) {
   [-55, 60], [5, 72], [60, 62], [-25, -25], [30, 25], [-30, 30], [25, -35],
 ].forEach(([x, z]) => makeCoralCluster(x, z));
 
+// small decorative reef patches everywhere (pretty, but too little to hide in —
+// the big lush clusters above are the real hideouts)
+const anemones = [];
+function makeReefPatch(x, z) {
+  const g = new THREE.Group();
+  const bright = [0xff6f91, 0xff9671, 0xffc75f, 0xf9f871, 0x9df9ef, 0xd65db1, 0xb39cff];
+  const kind = Math.floor(Math.random() * 3);
+  const c = bright[Math.floor(Math.random() * bright.length)];
+  if (kind === 0) {
+    // sea anemone: squishy base with a crown of waving tentacles
+    const base = new THREE.Mesh(new THREE.SphereGeometry(rand(0.5, 0.8), 10, 8), mat(c));
+    base.scale.y = 0.55;
+    base.position.y = 0.25;
+    g.add(base);
+    const tentColor = bright[Math.floor(Math.random() * bright.length)];
+    const tents = [];
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2;
+      const tent = new THREE.Mesh(new THREE.CapsuleGeometry(0.06, rand(0.5, 0.9), 3, 6), mat(tentColor));
+      tent.position.set(Math.cos(a) * 0.3, 0.7, Math.sin(a) * 0.3);
+      tent.rotation.z = Math.cos(a) * 0.55;
+      tent.rotation.x = -Math.sin(a) * 0.55;
+      g.add(tent);
+      tents.push({ mesh: tent, angle: a, baseZ: tent.rotation.z, baseX: tent.rotation.x });
+    }
+    anemones.push({ tents, phase: rand(0, Math.PI * 2) });
+  } else if (kind === 1) {
+    // fan coral: a flat colorful fan
+    const fan = new THREE.Mesh(
+      new THREE.CircleGeometry(rand(0.8, 1.5), 16, 0, Math.PI),
+      new THREE.MeshStandardMaterial({ color: c, side: THREE.DoubleSide, roughness: 0.9 })
+    );
+    fan.position.y = 0.1;
+    fan.rotation.y = rand(0, Math.PI);
+    g.add(fan);
+  } else {
+    // little coral sprig
+    for (let i = 0; i < 3; i++) {
+      const h = rand(0.6, 1.4);
+      const sprig = new THREE.Mesh(new THREE.CapsuleGeometry(0.1, h, 3, 6), mat(c));
+      sprig.position.set(rand(-0.4, 0.4), h / 2, rand(-0.4, 0.4));
+      sprig.rotation.z = rand(-0.4, 0.4);
+      g.add(sprig);
+    }
+  }
+  g.position.set(x, 0, z);
+  scene.add(g);
+}
+for (let i = 0; i < 110; i++) {
+  const x = rand(-92, 92), z = rand(-92, 92);
+  // keep clear of hideout clusters and the start pool so the reef reads clearly
+  if (coralClusters.some(cc => Math.hypot(x - cc.x, z - cc.z) < 10)) continue;
+  if (Math.hypot(x - 0, z - 88) < 12) continue; // START_POS pool
+  makeReefPatch(x, z);
+}
+
 function nearestCoralDistance(p) {
   let best = Infinity;
   for (const c of coralClusters) {
@@ -199,6 +261,33 @@ function nearestCoralDistance(p) {
 }
 function isHiddenAt(p) {
   return coralClusters.some(c => Math.hypot(p.x - c.x, p.z - c.z) < c.hideRadius);
+}
+
+// ----------------------------- kawaii face helpers -----------------------------
+// big sparkly anime eyes: white → big dark pupil → little white shine dot
+function addKawaiiEye(g, x, y, z, size) {
+  const side = Math.sign(z) || 1;
+  const white = new THREE.Mesh(new THREE.SphereGeometry(size, 12, 12), mat(0xffffff, { roughness: 0.25 }));
+  white.position.set(x, y, z);
+  g.add(white);
+  const pupil = new THREE.Mesh(new THREE.SphereGeometry(size * 0.62, 10, 10), mat(0x2b2b3d, { roughness: 0.25 }));
+  pupil.position.set(x + size * 0.35, y, z + side * size * 0.35);
+  g.add(pupil);
+  const shine = new THREE.Mesh(
+    new THREE.SphereGeometry(size * 0.22, 8, 8),
+    new THREE.MeshBasicMaterial({ color: 0xffffff })
+  );
+  shine.position.set(x + size * 0.55, y + size * 0.35, z + side * size * 0.45);
+  g.add(shine);
+}
+// rosy blush cheeks
+function addBlush(g, x, y, z, size = 0.16) {
+  for (const side of [-1, 1]) {
+    const cheek = new THREE.Mesh(new THREE.SphereGeometry(size, 8, 8), mat(0xff9eb5, { roughness: 1 }));
+    cheek.scale.set(1, 0.6, 1);
+    cheek.position.set(x, y, side * z);
+    g.add(cheek);
+  }
 }
 
 // ----------------------------- the player fish -----------------------------
@@ -222,13 +311,9 @@ function makeFish(bodyColor, finColor, size = 1) {
     fin.rotation.x = side * Math.PI / 2.4;
     fin.scale.z = 0.3;
     g.add(fin);
-    const eyeWhite = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 10), mat(0xffffff, { roughness: 0.3 }));
-    eyeWhite.position.set(0.85, 0.25, side * 0.42);
-    g.add(eyeWhite);
-    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 8), mat(0x222233, { roughness: 0.3 }));
-    pupil.position.set(0.99, 0.25, side * 0.5);
-    g.add(pupil);
+    addKawaiiEye(g, 0.85, 0.3, side * 0.45, 0.28);
   }
+  addBlush(g, 1.0, -0.05, 0.55, 0.14);
   // happy little mouth
   const mouth = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.05, 6, 12, Math.PI), mat(0x883344));
   mouth.position.set(1.28, -0.05, 0);
@@ -289,7 +374,7 @@ GEM_SPOTS.forEach(([x, y, z], i) => {
 // ----------------------------- sharks -----------------------------
 function makeShark() {
   const g = new THREE.Group();
-  const grey = 0x8fa8bd;
+  const grey = 0x8fb9e2; // soft kawaii blue instead of scary grey
   const body = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 16), mat(grey));
   body.scale.set(2.6, 1.1, 0.95);
   g.add(body);
@@ -312,10 +397,9 @@ function makeShark() {
     fin.rotation.x = side * Math.PI / 2.1;
     fin.scale.z = 0.25;
     g.add(fin);
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 8), mat(0x1c2733, { roughness: 0.3 }));
-    eye.position.set(1.75, 0.32, side * 0.55);
-    g.add(eye);
+    addKawaiiEye(g, 1.7, 0.4, side * 0.58, 0.3);
   }
+  addBlush(g, 1.95, 0.05, 0.72, 0.18);
   // toothy but not-too-scary grin
   const grin = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.07, 6, 14, Math.PI), mat(0x33202a));
   grin.position.set(2.25, -0.15, 0);
@@ -395,21 +479,27 @@ function makeOctopus(x, z, color) {
   head.scale.y = 1.15;
   head.position.y = 1.2;
   g.add(head);
+  // kawaii face on the front of the head (+z side)
   for (const side of [-1, 1]) {
-    const eyeW = new THREE.Mesh(new THREE.SphereGeometry(0.3, 10, 10), mat(0xffffff, { roughness: 0.3 }));
-    eyeW.position.set(side * 0.55, 1.35, 1.05);
-    g.add(eyeW);
-    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.14, 8, 8), mat(0x222233));
-    pupil.position.set(side * 0.55, 1.35, 1.3);
+    const white = new THREE.Mesh(new THREE.SphereGeometry(0.32, 12, 12), mat(0xffffff, { roughness: 0.25 }));
+    white.position.set(side * 0.55, 1.35, 1.05);
+    g.add(white);
+    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.19, 10, 10), mat(0x2b2b3d));
+    pupil.position.set(side * 0.55, 1.35, 1.28);
     g.add(pupil);
-  }
-  const cheeks = [];
-  for (const side of [-1, 1]) {
-    const cheek = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 8), mat(0xff9eb5));
-    cheek.position.set(side * 0.85, 1.05, 1.0);
+    const shine = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 8), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+    shine.position.set(side * 0.48, 1.47, 1.42);
+    g.add(shine);
+    const cheek = new THREE.Mesh(new THREE.SphereGeometry(0.17, 8, 8), mat(0xff9eb5, { roughness: 1 }));
+    cheek.scale.y = 0.6;
+    cheek.position.set(side * 0.95, 1.0, 0.95);
     g.add(cheek);
-    cheeks.push(cheek);
   }
+  // tiny happy mouth
+  const smile = new THREE.Mesh(new THREE.TorusGeometry(0.14, 0.045, 6, 12, Math.PI), mat(0x883344));
+  smile.position.set(0, 1.08, 1.28);
+  smile.rotation.z = Math.PI;
+  g.add(smile);
   const tentacles = [];
   for (let i = 0; i < 8; i++) {
     const a = (i / 8) * Math.PI * 2;
@@ -446,6 +536,25 @@ function makeJellyfish(x, z, color) {
   const bellMat = new THREE.MeshStandardMaterial({ color, transparent: true, opacity: 0.7, roughness: 0.3 });
   const bell = new THREE.Mesh(new THREE.SphereGeometry(0.9, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2), bellMat);
   g.add(bell);
+  // sweet sleepy face under the bell rim
+  for (const side of [-1, 1]) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 8), mat(0x2b2b3d));
+    eye.position.set(side * 0.3, -0.05, 0.75);
+    g.add(eye);
+    const shine = new THREE.Mesh(new THREE.SphereGeometry(0.03, 6, 6), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+    shine.position.set(side * 0.27, 0.01, 0.82);
+    g.add(shine);
+  }
+  const jSmile = new THREE.Mesh(new THREE.TorusGeometry(0.09, 0.03, 6, 10, Math.PI), mat(0x883344));
+  jSmile.position.set(0, -0.18, 0.78);
+  jSmile.rotation.z = Math.PI;
+  g.add(jSmile);
+  for (const side of [-1, 1]) {
+    const cheek = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 8), mat(0xff9eb5, { roughness: 1 }));
+    cheek.scale.y = 0.6;
+    cheek.position.set(side * 0.5, -0.12, 0.62);
+    g.add(cheek);
+  }
   const strands = [];
   for (let i = 0; i < 6; i++) {
     const a = (i / 6) * Math.PI * 2;
@@ -480,11 +589,8 @@ function makeTurtle(x, z) {
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.42, 12, 10), mat(0x7ccf8f));
   head.position.set(1.35, 0.1, 0);
   g.add(head);
-  for (const side of [-1, 1]) {
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 8), mat(0x222233));
-    eye.position.set(1.65, 0.25, side * 0.2);
-    g.add(eye);
-  }
+  for (const side of [-1, 1]) addKawaiiEye(g, 1.55, 0.3, side * 0.22, 0.13);
+  addBlush(g, 1.62, 0.02, 0.34, 0.09);
   const flippers = [];
   for (const [fx, fz] of [[0.7, 0.9], [0.7, -0.9], [-0.7, 0.9], [-0.7, -0.9]]) {
     const f = new THREE.Mesh(new THREE.SphereGeometry(0.4, 10, 8), mat(0x7ccf8f));
@@ -579,6 +685,11 @@ function showMessage(title, lines, buttonText, onClick) {
 }
 
 function resetGame() {
+  // iOS/Android only allow sound after a user gesture — the start tap is one
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  } catch (e) { /* sound is optional */ }
   state.running = true;
   state.lives = 3;
   state.gemsCollected = 0;
@@ -729,6 +840,13 @@ function animate() {
   for (const c of coralClusters) {
     for (const child of c.group.children) {
       if (child.userData.sway !== undefined) child.rotation.z = Math.sin(t * 1.4 + child.userData.sway) * 0.18;
+    }
+  }
+  for (const a of anemones) {
+    const wave = Math.sin(t * 2 + a.phase) * 0.12;
+    for (const tn of a.tents) {
+      tn.mesh.rotation.z = tn.baseZ + Math.cos(tn.angle) * wave;
+      tn.mesh.rotation.x = tn.baseX - Math.sin(tn.angle) * wave;
     }
   }
   for (const g of gems) {

@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>Sophie's Shark &amp; Fish Game 🐠💎</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐠</text></svg>">
 <style>
   html, body {
     margin: 0; padding: 0; overflow: hidden; height: 100%;
@@ -62,7 +63,7 @@
   /* ---------- Danger vignette ---------- */
   #danger {
     position: fixed; inset: 0; pointer-events: none; z-index: 5; opacity: 0;
-    box-shadow: inset 0 0 140px 40px rgba(255, 40, 40, 0.7);
+    box-shadow: inset 0 0 90px 12px rgba(255, 60, 60, 0.55);
     transition: opacity 0.3s;
   }
   /* ---------- Hidden indicator ---------- */
@@ -97,6 +98,13 @@
   @media (pointer: coarse) {
     #joystick { display: block; }
     #updown { display: flex; }
+    #hidden-badge { bottom: 170px; }
+  }
+  @media (max-width: 640px) {
+    .hud-box { font-size: 18px; padding: 5px 12px; }
+    #powerup { font-size: 18px; top: 54px; }
+    #hidden-badge { font-size: 16px; }
+    #message button { font-size: 22px; padding: 12px 30px; }
   }
   #help {
     position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%);
