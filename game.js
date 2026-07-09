@@ -17,10 +17,14 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 // phones get a lower pixel-ratio cap so the reef stays smooth
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, isTouchDevice ? 1.5 : 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping; // filmic color response instead of raw 90s RGB
+renderer.toneMappingExposure = 1.2;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x2fb9dc); // bright tropical lagoon water
-scene.fog = new THREE.Fog(0x2fb9dc, 30, 120);
+scene.fog = new THREE.Fog(0x2fb9dc, 30, 130);
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 400);
 
@@ -45,15 +49,49 @@ document.addEventListener('touchend', e => {
   lastTapTime = now;
 }, { passive: false });
 
-// lights: bright sunny lagoon
-scene.add(new THREE.HemisphereLight(0xe0fbff, 0x3e9db6, 1.25));
-const sun = new THREE.DirectionalLight(0xfff3d6, 1.5);
-sun.position.set(30, 60, 10);
+// lights: bright sunny lagoon with real shadows
+scene.add(new THREE.HemisphereLight(0xe0fbff, 0x3e9db6, 1.4));
+const sun = new THREE.DirectionalLight(0xfff3d6, 1.9);
+sun.position.set(40, 80, 20);
+sun.castShadow = true;
+sun.shadow.mapSize.set(isTouchDevice ? 1024 : 2048, isTouchDevice ? 1024 : 2048);
+sun.shadow.camera.left = sun.shadow.camera.bottom = -115;
+sun.shadow.camera.right = sun.shadow.camera.top = 115;
+sun.shadow.camera.near = 10;
+sun.shadow.camera.far = 220;
+sun.shadow.bias = -0.0005;
 scene.add(sun);
+
+// gradient depth backdrop: darker deep water below, sunlit aqua above
+{
+  const c = document.createElement('canvas');
+  c.width = 8; c.height = 256;
+  const ctx = c.getContext('2d');
+  const grad = ctx.createLinearGradient(0, 256, 0, 0);
+  grad.addColorStop(0, '#0d5e8c');
+  grad.addColorStop(0.45, '#2fb9dc');
+  grad.addColorStop(1, '#9fe8ff');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 8, 256);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const sky = new THREE.Mesh(
+    new THREE.SphereGeometry(280, 32, 24),
+    new THREE.MeshBasicMaterial({ map: tex, side: THREE.BackSide, fog: false, depthWrite: false })
+  );
+  sky.userData.noShadow = true;
+  scene.add(sky);
+}
 
 // ----------------------------- helpers -----------------------------
 const rand = (a, b) => a + Math.random() * (b - a);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+// height of the rolling sand dunes at any world position — everything that
+// sits on the floor uses this so nothing floats or sinks
+function floorY(x, z) {
+  return Math.sin(x * 0.05) * Math.cos(z * 0.06) * 1.8 + Math.sin(x * 0.22 - z * 0.13) * 0.35;
+}
 
 function mat(color, extra = {}) {
   return new THREE.MeshStandardMaterial({ color, roughness: 0.8, metalness: 0.05, ...extra });
@@ -86,15 +124,26 @@ const sfx = {
 
 // ----------------------------- ocean floor & water -----------------------------
 {
-  const sandGeo = new THREE.PlaneGeometry(WORLD_SIZE * 2, WORLD_SIZE * 2, 60, 60);
+  const sandGeo = new THREE.PlaneGeometry(WORLD_SIZE * 2, WORLD_SIZE * 2, 90, 90);
   const pos = sandGeo.attributes.position;
+  const colors = new Float32Array(pos.count * 3);
+  const warm = new THREE.Color(0xffffff), cool = new THREE.Color(0xd8ceb2), tint = new THREE.Color();
   for (let i = 0; i < pos.count; i++) {
-    pos.setZ(i, Math.sin(pos.getX(i) * 0.15) * Math.cos(pos.getY(i) * 0.15) * 0.8);
+    const x = pos.getX(i), y = pos.getY(i);
+    // the plane is rotated -90° about x, so its local +y is world -z
+    const h = floorY(x, -y);
+    pos.setZ(i, h);
+    // subtle color variation with height so the floor doesn't read as one flat sheet
+    tint.lerpColors(cool, warm, clamp(0.55 + h * 0.25, 0, 1));
+    colors[i * 3] = tint.r; colors[i * 3 + 1] = tint.g; colors[i * 3 + 2] = tint.b;
   }
+  sandGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   sandGeo.computeVertexNormals();
-  const sand = new THREE.Mesh(sandGeo, mat(0xf9e9b6, { roughness: 1 }));
+  const sand = new THREE.Mesh(sandGeo, mat(0xf9e9b6, { roughness: 1, vertexColors: true }));
   sand.rotation.x = -Math.PI / 2;
   sand.position.y = FLOOR_Y;
+  sand.receiveShadow = true;
+  sand.userData.noShadow = true; // gentle dunes self-shadow badly at grazing sun angles
   scene.add(sand);
 
   // shimmering water surface above
@@ -113,7 +162,8 @@ const sfx = {
       new THREE.SphereGeometry(rand(0.3, 0.9), 8, 6),
       mat(pebbleColors[i % pebbleColors.length])
     );
-    pebble.position.set(rand(-95, 95), 0.2, rand(-95, 95));
+    const px = rand(-95, 95), pz = rand(-95, 95);
+    pebble.position.set(px, floorY(px, pz) + 0.2, pz);
     pebble.scale.y = 0.5;
     scene.add(pebble);
   }
@@ -127,9 +177,83 @@ const sfx = {
       arm.position.set(Math.cos((a / 5) * Math.PI * 2) * 0.4, 0, -Math.sin((a / 5) * Math.PI * 2) * 0.4);
       star.add(arm);
     }
-    star.position.set(rand(-90, 90), 0.25, rand(-90, 90));
+    const sx = rand(-90, 90), sz = rand(-90, 90);
+    star.position.set(sx, floorY(sx, sz) + 0.25, sz);
     scene.add(star);
   }
+}
+
+// dancing caustic light patterns on the sand
+let causticTex = null;
+{
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, 256, 256);
+  ctx.strokeStyle = 'rgba(255,255,255,0.75)';
+  ctx.shadowColor = '#fff';
+  ctx.shadowBlur = 5;
+  for (let i = 0; i < 46; i++) {
+    ctx.lineWidth = rand(1, 2.6);
+    ctx.beginPath();
+    ctx.ellipse(rand(0, 256), rand(0, 256), rand(10, 34), rand(6, 22), rand(0, Math.PI), 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  causticTex = new THREE.CanvasTexture(c);
+  causticTex.wrapS = causticTex.wrapT = THREE.RepeatWrapping;
+  causticTex.repeat.set(13, 13);
+  // drape the caustic sheet over the same dunes, a hair above the sand
+  const cGeo = new THREE.PlaneGeometry(WORLD_SIZE * 2, WORLD_SIZE * 2, 90, 90);
+  const cPos = cGeo.attributes.position;
+  for (let i = 0; i < cPos.count; i++) {
+    cPos.setZ(i, floorY(cPos.getX(i), -cPos.getY(i)) + 0.1);
+  }
+  const caustics = new THREE.Mesh(
+    cGeo,
+    new THREE.MeshBasicMaterial({
+      map: causticTex, transparent: true, opacity: 0.13,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    })
+  );
+  caustics.rotation.x = -Math.PI / 2;
+  caustics.position.y = FLOOR_Y;
+  scene.add(caustics);
+}
+
+// soft sun rays slanting down from the surface
+const sunRays = [];
+for (let i = 0; i < 6; i++) {
+  const ray = new THREE.Mesh(
+    new THREE.ConeGeometry(rand(7, 13), 46, 12, 1, true),
+    new THREE.MeshBasicMaterial({
+      color: 0xfffbe0, transparent: true, opacity: rand(0.04, 0.07),
+      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false,
+    })
+  );
+  ray.position.set(rand(-70, 70), CEILING_Y - 3, rand(-70, 70));
+  ray.rotation.z = rand(-0.12, 0.12);
+  ray.userData.phase = rand(0, Math.PI * 2);
+  scene.add(ray);
+  sunRays.push(ray);
+}
+
+// marine snow: tiny drifting motes that make the water feel like water
+let snowPositions = null, snowPoints = null;
+{
+  const N = 260;
+  snowPositions = new Float32Array(N * 3);
+  for (let i = 0; i < N; i++) {
+    snowPositions[i * 3] = rand(-95, 95);
+    snowPositions[i * 3 + 1] = rand(0, CEILING_Y);
+    snowPositions[i * 3 + 2] = rand(-95, 95);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(snowPositions, 3));
+  snowPoints = new THREE.Points(geo, new THREE.PointsMaterial({
+    color: 0xe8f8ff, size: 0.14, transparent: true, opacity: 0.55, depthWrite: false,
+  }));
+  scene.add(snowPoints);
 }
 
 // rising bubbles
@@ -187,21 +311,38 @@ function makeCoralCluster(x, z) {
     piece.position.set(rand(-3, 3), 0, rand(-3, 3));
     group.add(piece);
   }
-  // swaying seaweed
-  for (let s = 0; s < 5; s++) {
-    const h = rand(2.5, 5);
+  // swaying kelp blades — curved and tapered so they read as plants, not planks
+  for (let s = 0; s < 6; s++) {
+    const h = rand(2.5, 5.5);
     const weed = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.5, h, 1, 6),
-      new THREE.MeshStandardMaterial({ color: 0x35c26b, side: THREE.DoubleSide, roughness: 0.9 })
+      makeKelpBlade(h),
+      new THREE.MeshStandardMaterial({
+        color: [0x35c26b, 0x2ea45f, 0x51d98a, 0x7fd45e][s % 4],
+        side: THREE.DoubleSide, roughness: 0.85,
+      })
     );
-    weed.position.set(rand(-4, 4), h / 2, rand(-4, 4));
-    weed.rotation.y = rand(0, Math.PI);
+    weed.position.set(rand(-4, 4), 0, rand(-4, 4));
+    weed.rotation.y = rand(0, Math.PI * 2);
     weed.userData.sway = rand(0, Math.PI * 2);
     group.add(weed);
   }
-  group.position.set(x, 0, z);
+  group.position.set(x, floorY(x, z), z);
   scene.add(group);
   coralClusters.push({ group, x, z, hideRadius: 6.5 });
+}
+
+// a kelp blade: base-pivoted, tapering toward the tip, with a gentle S-curve
+function makeKelpBlade(h) {
+  const geo = new THREE.PlaneGeometry(0.55, h, 3, 10);
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const v = pos.getY(i) / h + 0.5; // 0 at base → 1 at tip
+    pos.setX(i, pos.getX(i) * (1 - v * 0.72) * (1 + Math.sin(v * Math.PI) * 0.5));
+    pos.setZ(i, Math.sin(v * Math.PI * 1.3) * h * 0.14);
+  }
+  geo.translate(0, h / 2, 0); // pivot at the base so swaying looks rooted
+  geo.computeVertexNormals();
+  return geo;
 }
 
 // a ring of coral hideouts around the world plus a few in the middle
@@ -257,7 +398,7 @@ function makeReefPatch(x, z) {
       g.add(sprig);
     }
   }
-  g.position.set(x, 0, z);
+  g.position.set(x, floorY(x, z), z);
   scene.add(g);
 }
 for (let i = 0; i < 110; i++) {
@@ -896,13 +1037,14 @@ function makeCrab(x, z, color) {
     g.add(pupil);
   }
   addBlush(g, 0.5, 0.35, 0.5, 0.09);
-  g.position.set(x, 0, z);
+  g.position.set(x, floorY(x, z), z);
   scene.add(g);
   const phase = rand(0, Math.PI * 2), range = rand(4, 8);
   friends.push({
     group: g,
     update(t) {
       g.position.z = z + Math.sin(t * 0.6 + phase) * range; // scuttle sideways!
+      g.position.y = floorY(g.position.x, g.position.z); // stay on the dunes
       for (let i = 0; i < legs.length; i++) legs[i].rotation.z = Math.sin(t * 8 + i * 1.3) * 0.25;
     },
   });
@@ -1159,7 +1301,7 @@ function placeChest() {
   chest.position.copy(player.position).addScaledVector(dir, 14);
   chest.position.x = clamp(chest.position.x, -85, 85);
   chest.position.z = clamp(chest.position.z, -85, 85);
-  chest.position.y = 0;
+  chest.position.y = floorY(chest.position.x, chest.position.z);
   chest.rotation.y = Math.atan2(player.position.x - chest.position.x, player.position.z - chest.position.z);
   chest.visible = true;
   state.chestPhase = 'placed';
@@ -1256,6 +1398,20 @@ function animate() {
   if (chest.visible && state.chestPhase === 'placed') {
     chest.userData.glow.intensity = 8 + Math.sin(t * 3) * 5;
   }
+  // caustic light dances across the sand
+  causticTex.offset.set(t * 0.012, Math.sin(t * 0.35) * 0.03);
+  // sun rays gently pulse
+  for (const ray of sunRays) {
+    ray.material.opacity = 0.045 + Math.sin(t * 0.6 + ray.userData.phase) * 0.02;
+    ray.rotation.y = t * 0.05 + ray.userData.phase;
+  }
+  // marine snow drifts down and wraps around
+  for (let i = 0; i < snowPositions.length; i += 3) {
+    snowPositions[i] += Math.sin(t * 0.5 + i) * dt * 0.15;
+    snowPositions[i + 1] -= dt * 0.35;
+    if (snowPositions[i + 1] < 0) snowPositions[i + 1] = CEILING_Y;
+  }
+  snowPoints.geometry.attributes.position.needsUpdate = true;
   if (!state.running) compassDots.forEach(d2 => { d2.visible = false; });
 
   if (state.running) {
@@ -1280,9 +1436,10 @@ function animate() {
     player.rotation.y += turn * turnSpeed * dt;
     const dir = new THREE.Vector3(Math.cos(player.rotation.y), 0, -Math.sin(player.rotation.y));
     player.position.addScaledVector(dir, forward * baseSpeed * dt);
-    player.position.y = clamp(player.position.y + vertical * baseSpeed * 0.7 * dt, 1.2, CEILING_Y);
     player.position.x = clamp(player.position.x, -95, 95);
     player.position.z = clamp(player.position.z, -95, 95);
+    const seabed = floorY(player.position.x, player.position.z) + 1.0;
+    player.position.y = clamp(player.position.y + vertical * baseSpeed * 0.7 * dt, seabed, CEILING_Y);
 
     // wiggle the tail while swimming, pitch when climbing/diving, bank into turns
     playerParts.tail.rotation.y = Math.sin(t * (Math.abs(forward) > 0.05 ? 14 : 5)) * 0.5;
@@ -1335,7 +1492,9 @@ function animate() {
 
     // ---------- treasure chest finale ----------
     if (state.chestPhase === 'placed') {
-      if (player.position.distanceTo(chest.position) < 4.2) {
+      // horizontal distance only — the chest should open even if you hover above it
+      const dxz = Math.hypot(player.position.x - chest.position.x, player.position.z - chest.position.z);
+      if (dxz < 4.5) {
         state.chestPhase = 'opening';
         state.chestTimer = 0;
         sfx.nap();
@@ -1465,7 +1624,7 @@ function animate() {
           const side = new THREE.Vector3(-dirToTarget.z, 0, dirToTarget.x);
           s.mesh.position.addScaledVector(side, speed * dt);
         }
-        s.mesh.position.y = clamp(s.mesh.position.y, 2, CEILING_Y - 2);
+        s.mesh.position.y = clamp(s.mesh.position.y, floorY(s.mesh.position.x, s.mesh.position.z) + 2, CEILING_Y - 2);
         const targetYaw = Math.atan2(dirToTarget.x, dirToTarget.z) - Math.PI / 2;
         let dy = targetYaw - s.mesh.rotation.y;
         while (dy > Math.PI) dy -= Math.PI * 2;
@@ -1497,6 +1656,14 @@ function animate() {
 
   renderer.render(scene, camera);
 }
+
+// every solid thing casts a shadow onto the sand (transparent effects don't)
+scene.traverse(obj => {
+  if (obj.isMesh && !obj.material.transparent && obj.material.blending === THREE.NormalBlending
+      && !obj.userData.noShadow) {
+    obj.castShadow = true;
+  }
+});
 
 updateHud();
 animate();
