@@ -2,6 +2,9 @@
 
 A 3D underwater adventure **designed by Sophie (age 6, almost 7!)** 💛
 
+**▶️ Play it here: https://amyleesterling.github.io/sophie-shark-game/**
+(works on computers, phones, and tablets)
+
 ## How to play
 
 You are a little fish in a big open ocean. Collect all **4 gems 💎** to win —
