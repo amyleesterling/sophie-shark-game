@@ -1158,7 +1158,7 @@ function submitScore() {
   if (score <= 0) return;
   saveLocalScore(name, score, level);
   if (!lbOnline) return;
-  fetch(`${SB_URL}/rest/v1/scores`, {
+  fetch(`${SB_URL}/rest/v1/shark_scores`, {
     method: 'POST',
     headers: sbHeaders,
     body: JSON.stringify({ name, score, level }),
@@ -1168,7 +1168,7 @@ function submitScore() {
 async function fetchTopScores() {
   if (lbOnline) {
     try {
-      const res = await fetch(`${SB_URL}/rest/v1/top_scores?select=name,score,level&limit=10`, { headers: sbHeaders });
+      const res = await fetch(`${SB_URL}/rest/v1/shark_top_scores?select=name,score,level&limit=10`, { headers: sbHeaders });
       if (res.ok) return { rows: await res.json(), online: true };
     } catch (e) { /* fall through to local */ }
   }
