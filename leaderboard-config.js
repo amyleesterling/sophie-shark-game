@@ -10,4 +10,4 @@
 // Until this is filled in, high scores are saved on this device only.
 
 export const SUPABASE_URL = 'https://amyxocqdfcaeieerqllv.supabase.co';
-export const SUPABASE_ANON_KEY = ''; // long key starting with 'eyJ...' or 'sb_publishable_...'
+export const SUPABASE_ANON_KEY = 'sb_publishable_uvng-9IdwolvuiCG9pQTIQ_1gyaKOVH';
