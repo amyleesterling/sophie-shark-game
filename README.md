@@ -7,11 +7,15 @@ A 3D underwater adventure **designed by Sophie (age 6, almost 7!)** 💛
 
 ## How to play
 
-You are a little fish in a big open ocean. Collect all **4 gems 💎** to win —
-but watch out for the **sharks**! If they see you, they'll chase you.
+You are a little fish in an **endless ocean** — swim in any direction and
+the reef goes on forever. Collect **4 gems 💎** to earn the crown and level
+up, then keep going: every level brings more sharks, faster sharks, and 4
+fresh gems. Sparkle dots always point the way to the next one.
+
+Watch out for the **sharks**! If they see you, they'll chase you.
 **Hide behind the coral 🪸** and they can't see you at all.
 
-You have **3 lives ❤️❤️❤️**.
+You have **4 lives ❤️❤️❤️❤️**.
 
 ### Gem powers (Sophie's rules!)
 
@@ -20,12 +24,10 @@ You have **3 lives ❤️❤️❤️**.
 | 💎 1st gem | You get to swim **super fast** ⚡ |
 | 💎 2nd gem | The sharks fall asleep — you get a **head start** 😴 |
 | 💎 3rd gem | You leave a **sparkle trail** ✨ |
-| 💎 4th gem | A **treasure chest** appears — open it to win the **royal crown**! 👑 |
+| 💎 4th gem | A **treasure chest** appears — open it for the **royal crown** and LEVEL UP! 👑 |
 
-Sparkle dots always point the way to your next gem, so you can't get lost.
-
-**Levels:** every crown takes you to the next level — more sharks, faster
-sharks, shorter naps. How far can you go?
+**Levels:** every crown levels you up on the spot — more sharks, faster
+sharks, shorter naps, and 4 new gems appear nearby. How far can you go?
 
 **Make it yours:** pick your fish's color and name on the start screen
 (the game remembers for next time).

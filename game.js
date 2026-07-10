@@ -26,6 +26,8 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x2fb9dc); // bright tropical lagoon water
 scene.fog = new THREE.Fog(0x2fb9dc, 30, 130);
+let skyDome = null;
+let waterSurface = null;
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 400);
 
@@ -82,6 +84,7 @@ scene.add(sun);
   );
   sky.userData.noShadow = true;
   scene.add(sky);
+  skyDome = sky; // follows the player so the horizon never arrives
 }
 
 // ----------------------------- helpers -----------------------------
@@ -89,10 +92,15 @@ const rand = (a, b) => a + Math.random() * (b - a);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 // height of the rolling sand dunes at any world position — everything that
-// sits on the floor uses this so nothing floats or sinks
+// sits on the floor uses this so nothing floats or sinks.
+// Every term repeats every TILE units, so the sand mesh can hop by whole
+// tiles as you swim and the dunes always line up: the ocean never ends.
+const TILE = 120;
+const W1 = (Math.PI * 2) / TILE, W2 = (Math.PI * 2) / (TILE / 5), W3 = (Math.PI * 2) / (TILE / 3);
 function floorY(x, z) {
-  return Math.sin(x * 0.05) * Math.cos(z * 0.06) * 1.8 + Math.sin(x * 0.22 - z * 0.13) * 0.35;
+  return Math.sin(x * W1) * Math.cos(z * W1) * 1.7 + Math.sin(x * W2 + z * W3) * 0.3;
 }
+const snapToTile = v => Math.round(v / TILE) * TILE;
 
 function mat(color, extra = {}) {
   return new THREE.MeshStandardMaterial({ color, roughness: 0.8, metalness: 0.05, ...extra });
@@ -124,8 +132,10 @@ const sfx = {
 };
 
 // ----------------------------- ocean floor & water -----------------------------
+let sandTile = null; // follows the player in TILE-sized hops (dunes are TILE-periodic)
 {
-  const sandGeo = new THREE.PlaneGeometry(WORLD_SIZE * 2, WORLD_SIZE * 2, 90, 90);
+  const SAND_SPAN = TILE * 3; // covers well past the fog in every direction
+  const sandGeo = new THREE.PlaneGeometry(SAND_SPAN, SAND_SPAN, 120, 120);
   const pos = sandGeo.attributes.position;
   const colors = new Float32Array(pos.count * 3);
   const warm = new THREE.Color(0xffffff), cool = new THREE.Color(0xd8ceb2), tint = new THREE.Color();
@@ -146,46 +156,46 @@ const sfx = {
   sand.receiveShadow = true;
   sand.userData.noShadow = true; // gentle dunes self-shadow badly at grazing sun angles
   scene.add(sand);
+  sandTile = sand;
 
-  // shimmering water surface above
+  // shimmering water surface above (follows the player — the sea is endless)
   const surface = new THREE.Mesh(
-    new THREE.PlaneGeometry(WORLD_SIZE * 3, WORLD_SIZE * 3),
+    new THREE.PlaneGeometry(WORLD_SIZE * 4, WORLD_SIZE * 4),
     new THREE.MeshStandardMaterial({ color: 0x7fd4ff, transparent: true, opacity: 0.35, side: THREE.DoubleSide, roughness: 0.2 })
   );
   surface.rotation.x = -Math.PI / 2;
   surface.position.y = CEILING_Y + 4;
   scene.add(surface);
+  waterSurface = surface;
+}
 
-  // scattered candy-colored pebbles and starfish for cuteness
-  const pebbleColors = [0xffc6d9, 0xc5b3ff, 0xaee9ff, 0xffe3a3, 0xc8f7c5, 0xf6d4ff];
-  for (let i = 0; i < 50; i++) {
-    const pebble = new THREE.Mesh(
-      new THREE.SphereGeometry(rand(0.3, 0.9), 8, 6),
-      mat(pebbleColors[i % pebbleColors.length])
-    );
-    const px = rand(-95, 95), pz = rand(-95, 95);
-    pebble.position.set(px, floorY(px, pz) + 0.2, pz);
-    pebble.scale.y = 0.5;
-    scene.add(pebble);
+// makers for the small seafloor decorations, used by the chunk generator
+const PEBBLE_COLORS = [0xffc6d9, 0xc5b3ff, 0xaee9ff, 0xffe3a3, 0xc8f7c5, 0xf6d4ff];
+function makePebble(x, z) {
+  const pebble = new THREE.Mesh(
+    new THREE.SphereGeometry(rand(0.3, 0.9), 8, 6),
+    mat(PEBBLE_COLORS[Math.floor(Math.random() * PEBBLE_COLORS.length)])
+  );
+  pebble.position.set(x, floorY(x, z) + 0.2, z);
+  pebble.scale.y = 0.5;
+  return pebble;
+}
+function makeStarfish(x, z) {
+  const star = new THREE.Group();
+  const c = [0xff8fab, 0xffa94d, 0xff6b6b][Math.floor(rand(0, 3))];
+  for (let a = 0; a < 5; a++) {
+    const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.16, 0.7, 3, 6), mat(c));
+    arm.rotation.z = Math.PI / 2;
+    arm.rotation.y = (a / 5) * Math.PI * 2;
+    arm.position.set(Math.cos((a / 5) * Math.PI * 2) * 0.4, 0, -Math.sin((a / 5) * Math.PI * 2) * 0.4);
+    star.add(arm);
   }
-  for (let i = 0; i < 16; i++) {
-    const star = new THREE.Group();
-    const c = [0xff8fab, 0xffa94d, 0xff6b6b][i % 3];
-    for (let a = 0; a < 5; a++) {
-      const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.16, 0.7, 3, 6), mat(c));
-      arm.rotation.z = Math.PI / 2;
-      arm.rotation.y = (a / 5) * Math.PI * 2;
-      arm.position.set(Math.cos((a / 5) * Math.PI * 2) * 0.4, 0, -Math.sin((a / 5) * Math.PI * 2) * 0.4);
-      star.add(arm);
-    }
-    const sx = rand(-90, 90), sz = rand(-90, 90);
-    star.position.set(sx, floorY(sx, sz) + 0.25, sz);
-    scene.add(star);
-  }
+  star.position.set(x, floorY(x, z) + 0.25, z);
+  return star;
 }
 
 // dancing caustic light patterns on the sand
-let causticTex = null;
+let causticTex = null, causticTile = null;
 {
   const c = document.createElement('canvas');
   c.width = c.height = 256;
@@ -203,9 +213,10 @@ let causticTex = null;
   }
   causticTex = new THREE.CanvasTexture(c);
   causticTex.wrapS = causticTex.wrapT = THREE.RepeatWrapping;
-  causticTex.repeat.set(13, 13);
+  causticTex.repeat.set(12, 12); // 12 repeats over 3 tiles = whole repeats per TILE, so tile hops are seamless
   // drape the caustic sheet over the same dunes, a hair above the sand
-  const cGeo = new THREE.PlaneGeometry(WORLD_SIZE * 2, WORLD_SIZE * 2, 90, 90);
+  // (same TILE-periodic trick as the sand — it hops along with the player)
+  const cGeo = new THREE.PlaneGeometry(TILE * 3, TILE * 3, 120, 120);
   const cPos = cGeo.attributes.position;
   for (let i = 0; i < cPos.count; i++) {
     cPos.setZ(i, floorY(cPos.getX(i), -cPos.getY(i)) + 0.1);
@@ -220,6 +231,7 @@ let causticTex = null;
   caustics.rotation.x = -Math.PI / 2;
   caustics.position.y = FLOOR_Y;
   scene.add(caustics);
+  causticTile = caustics;
 }
 
 // soft sun rays slanting down from the surface
@@ -329,7 +341,9 @@ function makeCoralCluster(x, z) {
   }
   group.position.set(x, floorY(x, z), z);
   scene.add(group);
-  coralClusters.push({ group, x, z, hideRadius: 6.5 });
+  const entry = { group, x, z, hideRadius: 6.5 };
+  coralClusters.push(entry);
+  return entry;
 }
 
 // a kelp blade: base-pivoted, tapering toward the tip, with a gentle S-curve
@@ -346,14 +360,8 @@ function makeKelpBlade(h) {
   return geo;
 }
 
-// a ring of coral hideouts around the world plus a few in the middle
-[
-  [-60, -60], [0, -70], [65, -55], [-75, 0], [70, 10],
-  [-55, 60], [5, 72], [60, 62], [-25, -25], [30, 25], [-30, 30], [25, -35],
-].forEach(([x, z]) => makeCoralCluster(x, z));
-
 // small decorative reef patches everywhere (pretty, but too little to hide in —
-// the big lush clusters above are the real hideouts)
+// the big lush clusters are the real hideouts)
 const anemones = [];
 const anemoneSpots = []; // clownfish move in nearby
 function makeReefPatch(x, z) {
@@ -378,7 +386,8 @@ function makeReefPatch(x, z) {
       g.add(tent);
       tents.push({ mesh: tent, angle: a, baseZ: tent.rotation.z, baseX: tent.rotation.x });
     }
-    anemones.push({ tents, phase: rand(0, Math.PI * 2) });
+    g.userData.anemoneEntry = { tents, phase: rand(0, Math.PI * 2) };
+    anemones.push(g.userData.anemoneEntry);
     anemoneSpots.push({ x, z });
   } else if (kind === 1) {
     // fan coral: a flat colorful fan
@@ -401,14 +410,90 @@ function makeReefPatch(x, z) {
   }
   g.position.set(x, floorY(x, z), z);
   scene.add(g);
+  return g;
 }
-for (let i = 0; i < 110; i++) {
-  const x = rand(-92, 92), z = rand(-92, 92);
-  // keep clear of hideout clusters and the start pool so the reef reads clearly
-  if (coralClusters.some(cc => Math.hypot(x - cc.x, z - cc.z) < 10)) continue;
-  if (Math.hypot(x - 0, z - 88) < 12) continue; // START_POS pool
-  makeReefPatch(x, z);
+
+// ---------- infinite world: the reef generates itself in chunks around you ----------
+const CHUNK = 60;        // chunk edge length
+const CHUNK_RADIUS = 2;  // keep a 5×5 grid of chunks alive around the player
+const chunks = new Map(); // "cx,cz" → { objects: Mesh/Group[], cluster: coralClusters entry | null }
+
+function applyShadows(root) {
+  root.traverse(obj => {
+    if (obj.isMesh && !obj.material.transparent && obj.material.blending === THREE.NormalBlending
+        && !obj.userData.noShadow) {
+      obj.castShadow = true;
+    }
+  });
 }
+
+function spawnChunk(cx, cz) {
+  const x0 = cx * CHUNK, z0 = cz * CHUNK;
+  const objects = [];
+  let cluster = null;
+  // roughly every third chunk gets a big coral hideout
+  if (Math.random() < 0.35) {
+    const hx = x0 + rand(8, CHUNK - 8), hz = z0 + rand(8, CHUNK - 8);
+    cluster = makeCoralCluster(hx, hz);
+    objects.push(cluster.group);
+  }
+  const patches = Math.floor(rand(2, 5));
+  for (let i = 0; i < patches; i++) {
+    const px = x0 + rand(2, CHUNK - 2), pz = z0 + rand(2, CHUNK - 2);
+    if (cluster && Math.hypot(px - cluster.x, pz - cluster.z) < 10) continue;
+    objects.push(makeReefPatch(px, pz));
+  }
+  for (let i = 0; i < 4; i++) objects.push(makePebble(x0 + rand(0, CHUNK), z0 + rand(0, CHUNK)));
+  if (Math.random() < 0.6) objects.push(makeStarfish(x0 + rand(0, CHUNK), z0 + rand(0, CHUNK)));
+  for (const o of objects) {
+    if (!o.parent) scene.add(o);
+    applyShadows(o);
+  }
+  chunks.set(`${cx},${cz}`, { objects, cluster });
+}
+
+function despawnChunk(key) {
+  const chunk = chunks.get(key);
+  for (const o of chunk.objects) {
+    scene.remove(o);
+    o.traverse(child => {
+      if (child.isMesh) {
+        child.geometry.dispose();
+        if (child.material.map) child.material.map.dispose();
+        child.material.dispose();
+      }
+      if (child.userData.anemoneEntry) {
+        const i = anemones.indexOf(child.userData.anemoneEntry);
+        if (i >= 0) anemones.splice(i, 1);
+      }
+    });
+  }
+  if (chunk.cluster) {
+    const i = coralClusters.indexOf(chunk.cluster);
+    if (i >= 0) coralClusters.splice(i, 1);
+  }
+  chunks.delete(key);
+}
+
+function ensureChunksAround(x, z) {
+  const pcx = Math.floor(x / CHUNK), pcz = Math.floor(z / CHUNK);
+  const needed = new Set();
+  for (let dx = -CHUNK_RADIUS; dx <= CHUNK_RADIUS; dx++) {
+    for (let dz = -CHUNK_RADIUS; dz <= CHUNK_RADIUS; dz++) {
+      needed.add(`${pcx + dx},${pcz + dz}`);
+    }
+  }
+  for (const key of needed) {
+    if (!chunks.has(key)) {
+      const [cx, cz] = key.split(',').map(Number);
+      spawnChunk(cx, cz);
+    }
+  }
+  for (const key of [...chunks.keys()]) {
+    if (!needed.has(key)) despawnChunk(key);
+  }
+}
+ensureChunksAround(0, 88); // the reef around the starting pool
 
 function nearestCoralDistance(p) {
   let best = Infinity;
@@ -564,22 +649,34 @@ const trail = [];
 }
 
 // ----------------------------- gems -----------------------------
-const GEM_SPOTS = [
-  [-60, 3.5, -60], [65, 4, -55], [-55, 3.5, 60], [70, 4.5, 10],
-];
+// 4 gems per level, scattered around wherever the player currently is —
+// the ocean is endless, so the treasure comes to your neighborhood
 const gems = [];
-GEM_SPOTS.forEach(([x, y, z], i) => {
-  const colors = [0x59d4ff, 0xff6bd6, 0x7dff8a, 0xffd93d];
+[0x59d4ff, 0xff6bd6, 0x7dff8a, 0xffd93d].forEach(color => {
   const gem = new THREE.Mesh(
     new THREE.OctahedronGeometry(1.1),
-    new THREE.MeshStandardMaterial({ color: colors[i], emissive: colors[i], emissiveIntensity: 0.55, roughness: 0.2 })
+    new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.55, roughness: 0.2 })
   );
-  gem.position.set(x, y, z);
-  const halo = new THREE.PointLight(colors[i], 20, 14);
+  const halo = new THREE.PointLight(color, 20, 14);
   gem.add(halo);
   scene.add(gem);
-  gems.push({ mesh: gem, collected: false, baseY: y });
+  gems.push({ mesh: gem, collected: false, baseY: 4 });
 });
+
+function placeGemNear(g, cx, cz) {
+  const a = rand(0, Math.PI * 2), d = rand(45, 85);
+  const x = cx + Math.cos(a) * d, z = cz + Math.sin(a) * d;
+  g.baseY = floorY(x, z) + rand(3.5, 7);
+  g.mesh.position.set(x, g.baseY, z);
+}
+function spawnGemsForLevel(cx, cz) {
+  gems.forEach(g => {
+    g.collected = false;
+    g.mesh.visible = true;
+    placeGemNear(g, cx, cz);
+  });
+}
+spawnGemsForLevel(0, 30); // ahead of the starting pool, for the menu backdrop
 
 // compass sparkles: a trail of glowing dots leading toward the next goal
 const compassDots = [];
@@ -771,13 +868,24 @@ function pickPatrolTarget(shark) {
   // wander near home but never inside a coral hideout (sharks don't like coral!)
   for (let tries = 0; tries < 12; tries++) {
     const t = new THREE.Vector3(
-      clamp(shark.home.x + rand(-shark.range, shark.range), -92, 92),
+      shark.home.x + rand(-shark.range, shark.range),
       rand(2.5, 12),
-      clamp(shark.home.z + rand(-shark.range, shark.range), -92, 92)
+      shark.home.z + rand(-shark.range, shark.range)
     );
     if (nearestCoralDistance(t) > 9) return t;
   }
   return shark.home.clone();
+}
+
+// the ocean is endless — when a shark's hunting ground falls too far behind
+// the player, it quietly moves to a new patch of sea nearby (never on top of you)
+function relocateShark(s, px, pz) {
+  const a = rand(0, Math.PI * 2), d = rand(45, 85);
+  s.home.set(px + Math.cos(a) * d, 5, pz + Math.sin(a) * d);
+  if (s.mesh.position.distanceTo(new THREE.Vector3(px, s.mesh.position.y, pz)) > 130) {
+    s.mesh.position.set(s.home.x, rand(3, 7), s.home.z);
+  }
+  s.target = pickPatrolTarget(s);
 }
 
 // ----------------------------- friendly sea creatures -----------------------------
@@ -836,6 +944,7 @@ function makeOctopus(x, z, color) {
         tn.mesh.rotation.x = -Math.sin(tn.angle) * (0.5 + Math.sin(t * 3 + tn.angle + 1) * 0.2);
       }
     },
+    recycle(x2, z2) { home.x = x2; home.z = z2; },
   });
 }
 makeOctopus(-20, 0, 0xc678dd);
@@ -885,6 +994,7 @@ function makeJellyfish(x, z, color) {
       const squish = 1 + Math.sin(t * 2.4 + phase) * 0.15;
       bell.scale.set(squish, 2 - squish, squish);
     },
+    recycle(x2, z2) { g.position.x = x2; g.position.z = z2; },
   });
 }
 [[-35, -70, 0xa0e7ff], [55, 40, 0xffb3f0], [-70, 35, 0xc8ffd4], [20, -20, 0xfff3a0]].forEach(
@@ -913,7 +1023,8 @@ function makeTurtle(x, z) {
   g.position.set(x, rand(5, 10), z);
   scene.add(g);
   const radius = rand(18, 28);
-  const cx = x, cz = z, phase = rand(0, Math.PI * 2), speed = rand(0.08, 0.14);
+  let cx = x, cz = z;
+  const phase = rand(0, Math.PI * 2), speed = rand(0.08, 0.14);
   friends.push({
     group: g,
     update(t) {
@@ -923,6 +1034,7 @@ function makeTurtle(x, z) {
       g.rotation.y = -a - Math.PI / 2;
       for (let i = 0; i < flippers.length; i++) flippers[i].rotation.z = Math.sin(t * 3 + i) * 0.4;
     },
+    recycle(x2, z2) { cx = x2; cz = z2; },
   });
 }
 makeTurtle(0, 0);
@@ -958,14 +1070,16 @@ makeTurtle(-40, 50);
   whaleSmile.rotation.z = Math.PI;
   g.add(whaleSmile);
   scene.add(g);
+  let wcx = 0, wcz = 0;
   friends.push({
     group: g,
     update(t) {
       const a = t * 0.045;
-      g.position.set(Math.cos(a) * 58, 17 + Math.sin(t * 0.4) * 1.5, Math.sin(a) * 58);
+      g.position.set(wcx + Math.cos(a) * 58, 17 + Math.sin(t * 0.4) * 1.5, wcz + Math.sin(a) * 58);
       g.rotation.y = -a - Math.PI / 2;
       fluke.rotation.z = Math.sin(t * 1.2) * 0.25; // slow happy fluke flaps
     },
+    recycle(x2, z2) { wcx = x2; wcz = z2; },
   });
 }
 
@@ -994,13 +1108,15 @@ function makeSeahorse(x, z, color) {
   for (const side of [-1, 1]) addKawaiiEye(g, 0.28, 0.78, side * 0.18, 0.1);
   g.position.set(x, 2.2, z);
   scene.add(g);
-  const baseY = 2.2, phase = rand(0, Math.PI * 2);
+  const phase = rand(0, Math.PI * 2);
   friends.push({
     group: g,
     update(t) {
+      const baseY = floorY(g.position.x, g.position.z) + 2.2;
       g.position.y = baseY + Math.sin(t * 1.3 + phase) * 0.7;
       g.rotation.y = Math.sin(t * 0.4 + phase) * 0.9;
     },
+    recycle(x2, z2) { g.position.x = x2; g.position.z = z2; },
   });
 }
 makeSeahorse(-52, 55, 0xffd43b);
@@ -1041,13 +1157,15 @@ function makeCrab(x, z, color) {
   g.position.set(x, floorY(x, z), z);
   scene.add(g);
   const phase = rand(0, Math.PI * 2), range = rand(4, 8);
+  let hz = z;
   friends.push({
     group: g,
     update(t) {
-      g.position.z = z + Math.sin(t * 0.6 + phase) * range; // scuttle sideways!
+      g.position.z = hz + Math.sin(t * 0.6 + phase) * range; // scuttle sideways!
       g.position.y = floorY(g.position.x, g.position.z); // stay on the dunes
       for (let i = 0; i < legs.length; i++) legs[i].rotation.z = Math.sin(t * 8 + i * 1.3) * 0.25;
     },
+    recycle(x2, z2) { g.position.x = x2; hz = z2; },
   });
 }
 makeCrab(15, 55, 0xff6b6b);
@@ -1059,14 +1177,17 @@ makeCrab(-10, -60, 0xff8787);
 for (const spot of anemoneSpots.slice(0, 4)) {
   const nemo = makeFish(0xff7f2a, 0xffffff, 0.35).group;
   scene.add(nemo);
+  const home = { x: spot.x, z: spot.z };
   const phase = rand(0, Math.PI * 2), r = rand(1.6, 2.4), speed = rand(0.8, 1.4);
   friends.push({
     group: nemo,
     update(t) {
       const a = t * speed + phase;
-      nemo.position.set(spot.x + Math.cos(a) * r, 1.4 + Math.sin(t * 2 + phase) * 0.3, spot.z + Math.sin(a) * r);
+      const y = floorY(home.x, home.z) + 1.4;
+      nemo.position.set(home.x + Math.cos(a) * r, y + Math.sin(t * 2 + phase) * 0.3, home.z + Math.sin(a) * r);
       nemo.rotation.y = -a - Math.PI / 2;
     },
+    recycle(x2, z2) { home.x = x2; home.z = z2; },
   });
 }
 
@@ -1081,14 +1202,16 @@ for (const spot of anemoneSpots.slice(0, 4)) {
     minis.push(mini);
   }
   scene.add(school);
+  let scx = 0, scz = 0;
   friends.push({
     group: school,
     update(t) {
       const a = t * 0.18;
-      school.position.set(Math.cos(a) * 45, 9 + Math.sin(t * 0.5) * 2, Math.sin(a) * 45);
+      school.position.set(scx + Math.cos(a) * 45, 9 + Math.sin(t * 0.5) * 2, scz + Math.sin(a) * 45);
       school.rotation.y = -a - Math.PI / 2;
       for (let i = 0; i < minis.length; i++) minis[i].position.y = Math.sin(t * 2 + i) * 0.4 + (i % 3) - 1;
     },
+    recycle(x2, z2) { scx = x2; scz = z2; },
   });
 }
 
@@ -1123,7 +1246,7 @@ const state = {
 };
 
 function updateHud() {
-  hudLives.textContent = '❤️'.repeat(state.lives) + '🖤'.repeat(3 - state.lives);
+  hudLives.textContent = '❤️'.repeat(state.lives) + '🖤'.repeat(4 - state.lives);
   hudLevel.textContent = `⭐ Level ${state.level} · ${state.score}`;
   gemSlots.forEach((slot, i) => slot.classList.toggle('got', i < state.gemsCollected));
 }
@@ -1252,7 +1375,7 @@ function resetGame(level = 1, keepScore = false) {
     if (audioCtx.state === 'suspended') audioCtx.resume();
   } catch (e) { /* sound is optional */ }
   state.running = true;
-  state.lives = 3;
+  state.lives = 4;
   state.level = level;
   if (!keepScore) state.score = 0; // a new run starts fresh; level-ups keep the streak
   state.gemsCollected = 0;
@@ -1271,7 +1394,8 @@ function resetGame(level = 1, keepScore = false) {
   player.remove(crown);
   player.position.copy(START_POS);
   player.rotation.y = START_YAW;
-  gems.forEach(g => { g.collected = false; g.mesh.visible = true; });
+  ensureChunksAround(player.position.x, player.position.z);
+  spawnGemsForLevel(player.position.x, player.position.z);
   const cfg = levelCfg(level);
   sharks.forEach((s, i) => {
     s.active = i < cfg.sharkCount;
@@ -1279,8 +1403,8 @@ function resetGame(level = 1, keepScore = false) {
     s.state = 'patrol';
     s.spin = 0;
     s.mesh.rotation.x = 0;
+    relocateShark(s, player.position.x, player.position.z);
     s.mesh.position.copy(s.home);
-    s.target = pickPatrolTarget(s);
     s.mesh.userData.zzz.visible = false;
   });
   updateHud();
@@ -1374,8 +1498,6 @@ function collectGem(gem) {
 function placeChest() {
   const dir = new THREE.Vector3(Math.cos(player.rotation.y), 0, -Math.sin(player.rotation.y));
   chest.position.copy(player.position).addScaledVector(dir, 14);
-  chest.position.x = clamp(chest.position.x, -85, 85);
-  chest.position.z = clamp(chest.position.z, -85, 85);
   chest.position.y = floorY(chest.position.x, chest.position.z);
   chest.rotation.y = Math.atan2(player.position.x - chest.position.x, player.position.z - chest.position.z);
   chest.visible = true;
@@ -1383,20 +1505,30 @@ function placeChest() {
   showPowerup('💎 All 4 gems! A treasure chest appeared — follow the sparkles! ✨', 5000);
 }
 
-function winGame() {
-  state.running = false;
-  state.gameOver = true;
+// the crown is on your head — level up and keep swimming, no menus in an endless ocean
+function levelUp() {
   state.score += 500; // crown bonus!
-  updateHud();
+  state.level++;
+  state.gemsCollected = 0;
+  chest.visible = false;
+  chest.userData.glow.intensity = 0;
+  chestLid.rotation.x = 0;
   submitScore();
   sfx.win();
-  showMessage(
-    `🎉 LEVEL ${state.level} COMPLETE! 🎉`,
-    [`${state.fishName} found the royal crown! 👑`,
-     `Score so far: <b>${state.score}</b> ✨`,
-     `Ready for Level ${state.level + 1}? ${levelCfg(state.level + 1).sharkCount} sharks are waiting…`],
-    `Level ${state.level + 1}! 🌊`,
-    () => resetGame(state.level + 1, true) // the run continues — keep the score
+  const cfg = levelCfg(state.level);
+  sharks.forEach((s, i) => {
+    const wasActive = s.active;
+    s.active = i < cfg.sharkCount;
+    s.mesh.visible = s.active;
+    if (s.active && !wasActive) relocateShark(s, player.position.x, player.position.z);
+    if (s.state === 'chase') { s.state = 'patrol'; s.target = pickPatrolTarget(s); }
+  });
+  spawnGemsForLevel(player.position.x, player.position.z);
+  updateHud();
+  showPowerup(
+    `🎉 LEVEL ${state.level}! 👑 +500 points!<br>` +
+    `${cfg.sharkCount} sharks now, and 4 new gems just appeared — keep swimming, ${state.fishName}!`,
+    6000
   );
 }
 
@@ -1422,12 +1554,21 @@ function loseLife(chompingShark) {
     );
     return;
   }
-  // whoosh back to the start with a safety bubble
-  player.position.copy(START_POS);
-  player.rotation.y = START_YAW;
+  // stay where you are with a safety bubble — the chasing sharks swim off to sulk
   state.invulnerable = 3;
-  sharks.forEach(s => { if (s.state === 'chase') { s.state = 'patrol'; s.target = pickPatrolTarget(s); } });
-  showPowerup(state.lives === 2 ? '💔 Ouch! 2 lives left — hide behind the coral!' : '💔 Careful! Last life!');
+  sharks.forEach(s => {
+    if (s.state === 'chase') {
+      s.state = 'patrol';
+      relocateShark(s, player.position.x, player.position.z);
+      // nudge the biter itself well out of chomping range
+      const away = new THREE.Vector3().subVectors(s.mesh.position, player.position).setY(0).normalize();
+      s.mesh.position.copy(player.position).addScaledVector(away, 45);
+      s.mesh.position.y = clamp(s.mesh.position.y, 3, CEILING_Y - 2);
+    }
+  });
+  showPowerup(state.lives > 1
+    ? `💔 Ouch! ${state.lives} lives left — hide behind the coral!`
+    : '💔 Careful! Last life!');
 }
 
 // ----------------------------- main loop -----------------------------
@@ -1436,16 +1577,63 @@ const camTarget = new THREE.Vector3();
 let camYaw = START_YAW; // follows the player's heading smoothly
 let playerBank = 0;     // turn-banking, kept separate so barrel rolls can stack on top
 
+let worldTimer = 0;
 function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.05);
   const t = clock.elapsedTime;
+  const px = player.position.x, pz = player.position.z;
+
+  // ---------- the endless ocean follows the player ----------
+  sandTile.position.x = snapToTile(px);
+  sandTile.position.z = snapToTile(pz);
+  causticTile.position.x = sandTile.position.x;
+  causticTile.position.z = sandTile.position.z;
+  skyDome.position.set(px, 0, pz);
+  waterSurface.position.x = px;
+  waterSurface.position.z = pz;
+  sun.position.set(px + 40, 80, pz + 20);
+  sun.target.position.set(px, 0, pz);
+
+  worldTimer -= dt;
+  if (worldTimer <= 0) {
+    worldTimer = 0.8;
+    ensureChunksAround(px, pz);
+    // creatures and sharks left far behind quietly move to fresh water nearby
+    for (const f of friends) {
+      if (f.recycle && Math.hypot(f.group.position.x - px, f.group.position.z - pz) > 170) {
+        const a = rand(0, Math.PI * 2), d = rand(60, 120);
+        f.recycle(px + Math.cos(a) * d, pz + Math.sin(a) * d);
+      }
+    }
+    for (const s of sharks) {
+      if (s.active && Math.hypot(s.home.x - px, s.home.z - pz) > 150) relocateShark(s, px, pz);
+    }
+    // gems too — the treasure never gets lost over the horizon
+    if (state.running) {
+      for (const g of gems) {
+        if (!g.collected && Math.hypot(g.mesh.position.x - px, g.mesh.position.z - pz) > 170) {
+          placeGemNear(g, px, pz);
+        }
+      }
+    }
+  }
 
   // ambient world animation (always on, even on menus — it's cute)
   for (const f of friends) f.update(t, dt);
   for (const b of bubbles) {
     b.position.y += b.userData.speed * dt;
     if (b.position.y > CEILING_Y + 2) b.position.y = 0;
+    if (b.position.x - px > 95) b.position.x -= 190; else if (px - b.position.x > 95) b.position.x += 190;
+    if (b.position.z - pz > 95) b.position.z -= 190; else if (pz - b.position.z > 95) b.position.z += 190;
+  }
+  for (const ray of sunRays) {
+    // drifted out of view? fade to a fresh random spot so rays never stack up
+    if (Math.hypot(ray.position.x - px, ray.position.z - pz) > 110) {
+      const a = rand(0, Math.PI * 2), d = rand(25, 90);
+      ray.position.x = px + Math.cos(a) * d;
+      ray.position.z = pz + Math.sin(a) * d;
+    }
   }
   for (const c of coralClusters) {
     for (const child of c.group.children) {
@@ -1486,11 +1674,13 @@ function animate() {
     ray.material.opacity = 0.045 + Math.sin(t * 0.6 + ray.userData.phase) * 0.02;
     ray.rotation.y = t * 0.05 + ray.userData.phase;
   }
-  // marine snow drifts down and wraps around
+  // marine snow drifts down and wraps around the player
   for (let i = 0; i < snowPositions.length; i += 3) {
     snowPositions[i] += Math.sin(t * 0.5 + i) * dt * 0.15;
     snowPositions[i + 1] -= dt * 0.35;
     if (snowPositions[i + 1] < 0) snowPositions[i + 1] = CEILING_Y;
+    if (snowPositions[i] - px > 95) snowPositions[i] -= 190; else if (px - snowPositions[i] > 95) snowPositions[i] += 190;
+    if (snowPositions[i + 2] - pz > 95) snowPositions[i + 2] -= 190; else if (pz - snowPositions[i + 2] > 95) snowPositions[i + 2] += 190;
   }
   snowPoints.geometry.attributes.position.needsUpdate = true;
   if (!state.running) compassDots.forEach(d2 => { d2.visible = false; });
@@ -1516,9 +1706,7 @@ function animate() {
 
     player.rotation.y += turn * turnSpeed * dt;
     const dir = new THREE.Vector3(Math.cos(player.rotation.y), 0, -Math.sin(player.rotation.y));
-    player.position.addScaledVector(dir, forward * baseSpeed * dt);
-    player.position.x = clamp(player.position.x, -95, 95);
-    player.position.z = clamp(player.position.z, -95, 95);
+    player.position.addScaledVector(dir, forward * baseSpeed * dt); // no walls — the ocean is endless
     const seabed = floorY(player.position.x, player.position.z) + 1.0;
     player.position.y = clamp(player.position.y + vertical * baseSpeed * 0.7 * dt, seabed, CEILING_Y);
 
@@ -1607,7 +1795,7 @@ function animate() {
         crown.position.set(0.25, 1.05, 0);
         player.add(crown);
         sparkleBurst(headPos, 0xffd43b);
-        winGame();
+        levelUp();
       }
     }
 
@@ -1739,12 +1927,8 @@ function animate() {
 }
 
 // every solid thing casts a shadow onto the sand (transparent effects don't)
-scene.traverse(obj => {
-  if (obj.isMesh && !obj.material.transparent && obj.material.blending === THREE.NormalBlending
-      && !obj.userData.noShadow) {
-    obj.castShadow = true;
-  }
-});
+applyShadows(scene);
+scene.add(sun.target); // the sun tracks the player so shadows work everywhere
 
 updateHud();
 animate();
