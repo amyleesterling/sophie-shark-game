@@ -5,6 +5,7 @@
 //  and don't get eaten by the sharks. You have 3 lives!
 // ---------------------------------------------------------------
 import * as THREE from './lib/three.module.js';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './leaderboard-config.js';
 
 // ----------------------------- setup -----------------------------
 const WORLD_SIZE = 190;          // playable square is [-95, 95]
@@ -1107,6 +1108,7 @@ const state = {
   running: false,
   lives: 3,
   level: 1,
+  score: 0,              // +100 per gem, +500 per crown; one run = menu start → game over
   fishName: 'Little Fish',
   gemsCollected: 0,
   speedBoost: false,     // 1st gem
@@ -1122,9 +1124,78 @@ const state = {
 
 function updateHud() {
   hudLives.textContent = '❤️'.repeat(state.lives) + '🖤'.repeat(3 - state.lives);
-  hudLevel.textContent = '⭐ Level ' + state.level;
+  hudLevel.textContent = `⭐ Level ${state.level} · ${state.score}`;
   gemSlots.forEach((slot, i) => slot.classList.toggle('got', i < state.gemsCollected));
 }
+
+// ----------------------------- leaderboard -----------------------------
+// Scores go to Supabase when leaderboard-config.js is filled in; they are
+// always also kept in localStorage so the leaderboard works offline too.
+const sbOverride = window.__SUPABASE__ || {}; // test hook
+const SB_URL = sbOverride.url !== undefined ? sbOverride.url : SUPABASE_URL;
+const SB_KEY = sbOverride.key !== undefined ? sbOverride.key : SUPABASE_ANON_KEY;
+const lbOnline = !!(SB_URL && SB_KEY);
+const sbHeaders = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, 'Content-Type': 'application/json' };
+
+function localScores() {
+  try { return JSON.parse(localStorage.getItem('localScores') || '[]'); } catch (e) { return []; }
+}
+function saveLocalScore(name, score, level) {
+  const list = localScores();
+  const mine = list.find(r => r.name === name);
+  if (mine) {
+    mine.score = Math.max(mine.score, score);
+    mine.level = Math.max(mine.level, level);
+  } else {
+    list.push({ name, score, level });
+  }
+  list.sort((a, b) => b.score - a.score);
+  localStorage.setItem('localScores', JSON.stringify(list.slice(0, 25)));
+}
+
+function submitScore() {
+  const { fishName: name, score, level } = state;
+  if (score <= 0) return;
+  saveLocalScore(name, score, level);
+  if (!lbOnline) return;
+  fetch(`${SB_URL}/rest/v1/scores`, {
+    method: 'POST',
+    headers: sbHeaders,
+    body: JSON.stringify({ name, score, level }),
+  }).catch(() => { /* offline is fine — the local copy is already saved */ });
+}
+
+async function fetchTopScores() {
+  if (lbOnline) {
+    try {
+      const res = await fetch(`${SB_URL}/rest/v1/top_scores?select=name,score,level&limit=10`, { headers: sbHeaders });
+      if (res.ok) return { rows: await res.json(), online: true };
+    } catch (e) { /* fall through to local */ }
+  }
+  return { rows: localScores().slice(0, 10), online: false };
+}
+
+const lbEl = document.getElementById('leaderboard');
+const lbListEl = document.getElementById('lb-list');
+const lbSourceEl = document.getElementById('lb-source');
+async function showLeaderboard() {
+  lbEl.classList.add('show');
+  lbListEl.innerHTML = '<li class="lb-empty">Loading…</li>';
+  lbSourceEl.textContent = '';
+  const { rows, online } = await fetchTopScores();
+  const medals = ['🥇', '🥈', '🥉'];
+  lbListEl.innerHTML = rows.length
+    ? rows.map((r, i) =>
+        `<li><span>${medals[i] || (i + 1) + '.'}</span>` +
+        `<span class="lb-name">${String(r.name).replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]))}</span>` +
+        `<span class="lb-lvl">Lv ${r.level}</span><span class="lb-pts">${r.score}</span></li>`).join('')
+    : '<li class="lb-empty">No scores yet — go collect some gems! 💎</li>';
+  lbSourceEl.textContent = online
+    ? '🌍 Online leaderboard'
+    : lbOnline ? '📴 Offline — showing scores from this device' : '📱 Scores from this device';
+}
+document.getElementById('lb-btn').addEventListener('click', showLeaderboard);
+document.getElementById('lb-close').addEventListener('click', () => lbEl.classList.remove('show'));
 
 // ---------- pick-your-fish (start screen only; choice is remembered) ----------
 const nameInputEl = document.getElementById('fish-name');
@@ -1167,12 +1238,14 @@ function showMessage(title, lines, buttonText, onClick) {
   dangerEl.style.opacity = 0;
   messageEl.innerHTML =
     `<h1>${title}</h1>` + lines.map(l => `<p>${l}</p>`).join('') +
-    `<button id="msg-btn">${buttonText}</button>`;
+    `<button id="msg-btn">${buttonText}</button>` +
+    `<button id="msg-lb-btn" class="secondary">🏆 High Scores</button>`;
   messageEl.classList.add('show');
   document.getElementById('msg-btn').addEventListener('click', onClick);
+  document.getElementById('msg-lb-btn').addEventListener('click', showLeaderboard);
 }
 
-function resetGame(level = 1) {
+function resetGame(level = 1, keepScore = false) {
   // iOS/Android only allow sound after a user gesture — the start tap is one
   try {
     audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
@@ -1181,6 +1254,7 @@ function resetGame(level = 1) {
   state.running = true;
   state.lives = 3;
   state.level = level;
+  if (!keepScore) state.score = 0; // a new run starts fresh; level-ups keep the streak
   state.gemsCollected = 0;
   state.speedBoost = false;
   state.napTimer = 0;
@@ -1273,6 +1347,7 @@ function collectGem(gem) {
   gem.collected = true;
   gem.mesh.visible = false;
   state.gemsCollected++;
+  state.score += 100;
   updateHud();
   sfx.gem();
   sparkleBurst(gem.mesh.position, gem.mesh.material.color);
@@ -1311,14 +1386,17 @@ function placeChest() {
 function winGame() {
   state.running = false;
   state.gameOver = true;
+  state.score += 500; // crown bonus!
+  updateHud();
+  submitScore();
   sfx.win();
   showMessage(
     `🎉 LEVEL ${state.level} COMPLETE! 🎉`,
     [`${state.fishName} found the royal crown! 👑`,
-     `All 4 gems collected — you are the best fish in the sea! 🐠`,
+     `Score so far: <b>${state.score}</b> ✨`,
      `Ready for Level ${state.level + 1}? ${levelCfg(state.level + 1).sharkCount} sharks are waiting…`],
     `Level ${state.level + 1}! 🌊`,
-    () => resetGame(state.level + 1)
+    () => resetGame(state.level + 1, true) // the run continues — keep the score
   );
 }
 
@@ -1332,10 +1410,13 @@ function loseLife(chompingShark) {
   if (state.lives <= 0) {
     state.running = false;
     state.gameOver = true;
+    submitScore();
     sfx.lose();
     showMessage(
       '🦈 Chomp! Game Over',
-      [`The sharks got ${state.fishName} this time…`, 'But brave fish always try again!'],
+      [`The sharks got ${state.fishName} this time…`,
+       `Final score: <b>${state.score}</b> ✨`,
+       'But brave fish always try again!'],
       `Try Level ${state.level} Again! 💪`,
       () => resetGame(state.level)
     );
@@ -1669,4 +1750,4 @@ updateHud();
 animate();
 
 // tiny hook for automated testing / debugging in the console
-window.__game = { state, player, sharks, gems, coralClusters, resetGame, chest, crown, playerParts };
+window.__game = { state, player, sharks, gems, coralClusters, resetGame, chest, crown, playerParts, showLeaderboard, submitScore, localScores };

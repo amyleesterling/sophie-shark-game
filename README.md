@@ -46,6 +46,26 @@ just swimming around.
 
 On a phone or tablet, use the on-screen joystick and the ⬆️ / ⬇️ buttons.
 
+## 🏆 High-score leaderboard
+
+Every gem is worth **100 points** and every crown **500** — your score keeps
+growing as long as your run survives. Tap **🏆 High Scores** on the start
+screen (or after a game) to see the top 10.
+
+Scores are always saved on the device. To share one leaderboard across all
+your devices (and the whole family), connect a free
+[Supabase](https://supabase.com) project:
+
+1. Create a project at supabase.com (the free plan is plenty)
+2. Open the **SQL Editor** and run the contents of
+   [`supabase-setup.sql`](supabase-setup.sql)
+3. In **Project Settings → API**, copy the *Project URL* and *anon public*
+   key into [`leaderboard-config.js`](leaderboard-config.js)
+
+That's it — the anon key is safe to publish because the database rules only
+allow adding and reading scores. If the internet is down, the game quietly
+falls back to the on-device scores.
+
 ## Running the game
 
 No build step, no dependencies to install (Three.js is bundled in `lib/`).

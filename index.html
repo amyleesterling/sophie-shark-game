@@ -80,6 +80,44 @@
   }
   input { -webkit-user-select: text !important; user-select: text !important; touch-action: manipulation; }
 
+  /* ---------- leaderboard ---------- */
+  #message button.secondary {
+    display: block; margin: 14px auto 0; font-size: 20px;
+    padding: 10px 26px; background: linear-gradient(#7fd4ff, #2f9fd8);
+    box-shadow: 0 5px 0 #1c6e9c; border-width: 3px;
+  }
+  #message button.secondary:active { box-shadow: 0 2px 0 #1c6e9c; }
+  #leaderboard {
+    position: fixed; inset: 0; display: none; z-index: 30;
+    align-items: center; justify-content: center;
+    background: rgba(2, 20, 40, 0.7);
+  }
+  #leaderboard.show { display: flex; }
+  .lb-panel {
+    background: linear-gradient(#0b4a74, #06304f);
+    border: 4px solid rgba(255,255,255,0.4); border-radius: 26px;
+    padding: 22px 30px; color: #fff; text-align: center;
+    width: min(420px, 88vw); max-height: 82vh; overflow-y: auto;
+  }
+  .lb-panel h2 { margin: 0 0 12px; font-size: 30px; text-shadow: 0 2px 5px rgba(0,0,0,0.5); }
+  #lb-list { list-style: none; margin: 0; padding: 0; }
+  #lb-list li {
+    display: flex; justify-content: space-between; gap: 10px;
+    font-size: 20px; padding: 7px 10px; border-radius: 12px;
+  }
+  #lb-list li:nth-child(odd) { background: rgba(255,255,255,0.08); }
+  #lb-list .lb-name { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #lb-list .lb-pts { font-weight: bold; color: #ffe066; }
+  #lb-list .lb-lvl { color: #9fe8ff; font-size: 16px; align-self: center; }
+  #lb-list .lb-empty { justify-content: center; color: rgba(255,255,255,0.7); }
+  #lb-source { font-size: 14px; color: rgba(255,255,255,0.6); margin: 10px 0 4px; }
+  #lb-close {
+    font-family: inherit; font-size: 20px; margin-top: 8px;
+    padding: 10px 30px; border-radius: 30px; border: 3px solid #fff;
+    background: linear-gradient(#ff9ecd, #ff5ea8); color: #fff; cursor: pointer;
+    box-shadow: 0 4px 0 #c23a7e;
+  }
+
   /* ---------- Danger vignette ---------- */
   #danger {
     position: fixed; inset: 0; pointer-events: none; z-index: 5; opacity: 0;
@@ -159,6 +197,16 @@
     <input id="fish-name" maxlength="14" placeholder="Name your fish!" autocomplete="off">
   </div>
   <button id="start-btn">Let's Swim! 🌊</button>
+  <button id="lb-btn" class="secondary">🏆 High Scores</button>
+</div>
+
+<div id="leaderboard">
+  <div class="lb-panel">
+    <h2>🏆 High Scores</h2>
+    <ol id="lb-list"><li class="lb-empty">Loading…</li></ol>
+    <p id="lb-source"></p>
+    <button id="lb-close">Back 🌊</button>
+  </div>
 </div>
 
 <div id="joystick"><div class="knob"></div></div>
