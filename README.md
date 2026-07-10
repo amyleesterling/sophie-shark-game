@@ -18,12 +18,22 @@ You have **3 lives ❤️❤️❤️**.
 | Gem | Power |
 |-----|-------|
 | 💎 1st gem | You get to swim **super fast** ⚡ |
-| 💎 2nd gem | The sharks fall asleep — you get a **5 second head start** 😴 |
+| 💎 2nd gem | The sharks fall asleep — you get a **head start** 😴 |
 | 💎 3rd gem | You leave a **sparkle trail** ✨ |
-| 💎 4th gem | **YOU WIN!** 🎉 |
+| 💎 4th gem | A **treasure chest** appears — open it to win the **royal crown**! 👑 |
+
+Sparkle dots always point the way to your next gem, so you can't get lost.
+
+**Levels:** every crown takes you to the next level — more sharks, faster
+sharks, shorter naps. How far can you go?
+
+**Make it yours:** pick your fish's color and name on the start screen
+(the game remembers for next time).
 
 The ocean is full of friendly creatures too: octopuses 🐙, jellyfish, sea
-turtles 🐢, starfish, and a little school of fish just swimming around.
+turtles 🐢, a giant gentle whale 🐋, seahorses, scuttling crabs 🦀,
+clownfish living in the anemones, starfish, and a little school of fish
+just swimming around.
 
 ## Controls
 

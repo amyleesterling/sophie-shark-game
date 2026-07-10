@@ -17,10 +17,14 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 // phones get a lower pixel-ratio cap so the reef stays smooth
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, isTouchDevice ? 1.5 : 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping; // filmic color response instead of raw 90s RGB
+renderer.toneMappingExposure = 1.2;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x2fb9dc); // bright tropical lagoon water
-scene.fog = new THREE.Fog(0x2fb9dc, 30, 120);
+scene.fog = new THREE.Fog(0x2fb9dc, 30, 130);
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 400);
 
@@ -45,15 +49,49 @@ document.addEventListener('touchend', e => {
   lastTapTime = now;
 }, { passive: false });
 
-// lights: bright sunny lagoon
-scene.add(new THREE.HemisphereLight(0xe0fbff, 0x3e9db6, 1.25));
-const sun = new THREE.DirectionalLight(0xfff3d6, 1.5);
-sun.position.set(30, 60, 10);
+// lights: bright sunny lagoon with real shadows
+scene.add(new THREE.HemisphereLight(0xe0fbff, 0x3e9db6, 1.4));
+const sun = new THREE.DirectionalLight(0xfff3d6, 1.9);
+sun.position.set(40, 80, 20);
+sun.castShadow = true;
+sun.shadow.mapSize.set(isTouchDevice ? 1024 : 2048, isTouchDevice ? 1024 : 2048);
+sun.shadow.camera.left = sun.shadow.camera.bottom = -115;
+sun.shadow.camera.right = sun.shadow.camera.top = 115;
+sun.shadow.camera.near = 10;
+sun.shadow.camera.far = 220;
+sun.shadow.bias = -0.0005;
 scene.add(sun);
+
+// gradient depth backdrop: darker deep water below, sunlit aqua above
+{
+  const c = document.createElement('canvas');
+  c.width = 8; c.height = 256;
+  const ctx = c.getContext('2d');
+  const grad = ctx.createLinearGradient(0, 256, 0, 0);
+  grad.addColorStop(0, '#0d5e8c');
+  grad.addColorStop(0.45, '#2fb9dc');
+  grad.addColorStop(1, '#9fe8ff');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 8, 256);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const sky = new THREE.Mesh(
+    new THREE.SphereGeometry(280, 32, 24),
+    new THREE.MeshBasicMaterial({ map: tex, side: THREE.BackSide, fog: false, depthWrite: false })
+  );
+  sky.userData.noShadow = true;
+  scene.add(sky);
+}
 
 // ----------------------------- helpers -----------------------------
 const rand = (a, b) => a + Math.random() * (b - a);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+// height of the rolling sand dunes at any world position — everything that
+// sits on the floor uses this so nothing floats or sinks
+function floorY(x, z) {
+  return Math.sin(x * 0.05) * Math.cos(z * 0.06) * 1.8 + Math.sin(x * 0.22 - z * 0.13) * 0.35;
+}
 
 function mat(color, extra = {}) {
   return new THREE.MeshStandardMaterial({ color, roughness: 0.8, metalness: 0.05, ...extra });
@@ -86,15 +124,26 @@ const sfx = {
 
 // ----------------------------- ocean floor & water -----------------------------
 {
-  const sandGeo = new THREE.PlaneGeometry(WORLD_SIZE * 2, WORLD_SIZE * 2, 60, 60);
+  const sandGeo = new THREE.PlaneGeometry(WORLD_SIZE * 2, WORLD_SIZE * 2, 90, 90);
   const pos = sandGeo.attributes.position;
+  const colors = new Float32Array(pos.count * 3);
+  const warm = new THREE.Color(0xffffff), cool = new THREE.Color(0xd8ceb2), tint = new THREE.Color();
   for (let i = 0; i < pos.count; i++) {
-    pos.setZ(i, Math.sin(pos.getX(i) * 0.15) * Math.cos(pos.getY(i) * 0.15) * 0.8);
+    const x = pos.getX(i), y = pos.getY(i);
+    // the plane is rotated -90° about x, so its local +y is world -z
+    const h = floorY(x, -y);
+    pos.setZ(i, h);
+    // subtle color variation with height so the floor doesn't read as one flat sheet
+    tint.lerpColors(cool, warm, clamp(0.55 + h * 0.25, 0, 1));
+    colors[i * 3] = tint.r; colors[i * 3 + 1] = tint.g; colors[i * 3 + 2] = tint.b;
   }
+  sandGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   sandGeo.computeVertexNormals();
-  const sand = new THREE.Mesh(sandGeo, mat(0xf9e9b6, { roughness: 1 }));
+  const sand = new THREE.Mesh(sandGeo, mat(0xf9e9b6, { roughness: 1, vertexColors: true }));
   sand.rotation.x = -Math.PI / 2;
   sand.position.y = FLOOR_Y;
+  sand.receiveShadow = true;
+  sand.userData.noShadow = true; // gentle dunes self-shadow badly at grazing sun angles
   scene.add(sand);
 
   // shimmering water surface above
@@ -113,7 +162,8 @@ const sfx = {
       new THREE.SphereGeometry(rand(0.3, 0.9), 8, 6),
       mat(pebbleColors[i % pebbleColors.length])
     );
-    pebble.position.set(rand(-95, 95), 0.2, rand(-95, 95));
+    const px = rand(-95, 95), pz = rand(-95, 95);
+    pebble.position.set(px, floorY(px, pz) + 0.2, pz);
     pebble.scale.y = 0.5;
     scene.add(pebble);
   }
@@ -127,9 +177,83 @@ const sfx = {
       arm.position.set(Math.cos((a / 5) * Math.PI * 2) * 0.4, 0, -Math.sin((a / 5) * Math.PI * 2) * 0.4);
       star.add(arm);
     }
-    star.position.set(rand(-90, 90), 0.25, rand(-90, 90));
+    const sx = rand(-90, 90), sz = rand(-90, 90);
+    star.position.set(sx, floorY(sx, sz) + 0.25, sz);
     scene.add(star);
   }
+}
+
+// dancing caustic light patterns on the sand
+let causticTex = null;
+{
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, 256, 256);
+  ctx.strokeStyle = 'rgba(255,255,255,0.75)';
+  ctx.shadowColor = '#fff';
+  ctx.shadowBlur = 5;
+  for (let i = 0; i < 46; i++) {
+    ctx.lineWidth = rand(1, 2.6);
+    ctx.beginPath();
+    ctx.ellipse(rand(0, 256), rand(0, 256), rand(10, 34), rand(6, 22), rand(0, Math.PI), 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  causticTex = new THREE.CanvasTexture(c);
+  causticTex.wrapS = causticTex.wrapT = THREE.RepeatWrapping;
+  causticTex.repeat.set(13, 13);
+  // drape the caustic sheet over the same dunes, a hair above the sand
+  const cGeo = new THREE.PlaneGeometry(WORLD_SIZE * 2, WORLD_SIZE * 2, 90, 90);
+  const cPos = cGeo.attributes.position;
+  for (let i = 0; i < cPos.count; i++) {
+    cPos.setZ(i, floorY(cPos.getX(i), -cPos.getY(i)) + 0.1);
+  }
+  const caustics = new THREE.Mesh(
+    cGeo,
+    new THREE.MeshBasicMaterial({
+      map: causticTex, transparent: true, opacity: 0.13,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    })
+  );
+  caustics.rotation.x = -Math.PI / 2;
+  caustics.position.y = FLOOR_Y;
+  scene.add(caustics);
+}
+
+// soft sun rays slanting down from the surface
+const sunRays = [];
+for (let i = 0; i < 6; i++) {
+  const ray = new THREE.Mesh(
+    new THREE.ConeGeometry(rand(7, 13), 46, 12, 1, true),
+    new THREE.MeshBasicMaterial({
+      color: 0xfffbe0, transparent: true, opacity: rand(0.04, 0.07),
+      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false,
+    })
+  );
+  ray.position.set(rand(-70, 70), CEILING_Y - 3, rand(-70, 70));
+  ray.rotation.z = rand(-0.12, 0.12);
+  ray.userData.phase = rand(0, Math.PI * 2);
+  scene.add(ray);
+  sunRays.push(ray);
+}
+
+// marine snow: tiny drifting motes that make the water feel like water
+let snowPositions = null, snowPoints = null;
+{
+  const N = 260;
+  snowPositions = new Float32Array(N * 3);
+  for (let i = 0; i < N; i++) {
+    snowPositions[i * 3] = rand(-95, 95);
+    snowPositions[i * 3 + 1] = rand(0, CEILING_Y);
+    snowPositions[i * 3 + 2] = rand(-95, 95);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(snowPositions, 3));
+  snowPoints = new THREE.Points(geo, new THREE.PointsMaterial({
+    color: 0xe8f8ff, size: 0.14, transparent: true, opacity: 0.55, depthWrite: false,
+  }));
+  scene.add(snowPoints);
 }
 
 // rising bubbles
@@ -187,21 +311,38 @@ function makeCoralCluster(x, z) {
     piece.position.set(rand(-3, 3), 0, rand(-3, 3));
     group.add(piece);
   }
-  // swaying seaweed
-  for (let s = 0; s < 5; s++) {
-    const h = rand(2.5, 5);
+  // swaying kelp blades — curved and tapered so they read as plants, not planks
+  for (let s = 0; s < 6; s++) {
+    const h = rand(2.5, 5.5);
     const weed = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.5, h, 1, 6),
-      new THREE.MeshStandardMaterial({ color: 0x35c26b, side: THREE.DoubleSide, roughness: 0.9 })
+      makeKelpBlade(h),
+      new THREE.MeshStandardMaterial({
+        color: [0x35c26b, 0x2ea45f, 0x51d98a, 0x7fd45e][s % 4],
+        side: THREE.DoubleSide, roughness: 0.85,
+      })
     );
-    weed.position.set(rand(-4, 4), h / 2, rand(-4, 4));
-    weed.rotation.y = rand(0, Math.PI);
+    weed.position.set(rand(-4, 4), 0, rand(-4, 4));
+    weed.rotation.y = rand(0, Math.PI * 2);
     weed.userData.sway = rand(0, Math.PI * 2);
     group.add(weed);
   }
-  group.position.set(x, 0, z);
+  group.position.set(x, floorY(x, z), z);
   scene.add(group);
   coralClusters.push({ group, x, z, hideRadius: 6.5 });
+}
+
+// a kelp blade: base-pivoted, tapering toward the tip, with a gentle S-curve
+function makeKelpBlade(h) {
+  const geo = new THREE.PlaneGeometry(0.55, h, 3, 10);
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const v = pos.getY(i) / h + 0.5; // 0 at base → 1 at tip
+    pos.setX(i, pos.getX(i) * (1 - v * 0.72) * (1 + Math.sin(v * Math.PI) * 0.5));
+    pos.setZ(i, Math.sin(v * Math.PI * 1.3) * h * 0.14);
+  }
+  geo.translate(0, h / 2, 0); // pivot at the base so swaying looks rooted
+  geo.computeVertexNormals();
+  return geo;
 }
 
 // a ring of coral hideouts around the world plus a few in the middle
@@ -213,6 +354,7 @@ function makeCoralCluster(x, z) {
 // small decorative reef patches everywhere (pretty, but too little to hide in —
 // the big lush clusters above are the real hideouts)
 const anemones = [];
+const anemoneSpots = []; // clownfish move in nearby
 function makeReefPatch(x, z) {
   const g = new THREE.Group();
   const bright = [0xff6f91, 0xff9671, 0xffc75f, 0xf9f871, 0x9df9ef, 0xd65db1, 0xb39cff];
@@ -236,6 +378,7 @@ function makeReefPatch(x, z) {
       tents.push({ mesh: tent, angle: a, baseZ: tent.rotation.z, baseX: tent.rotation.x });
     }
     anemones.push({ tents, phase: rand(0, Math.PI * 2) });
+    anemoneSpots.push({ x, z });
   } else if (kind === 1) {
     // fan coral: a flat colorful fan
     const fan = new THREE.Mesh(
@@ -255,7 +398,7 @@ function makeReefPatch(x, z) {
       g.add(sprig);
     }
   }
-  g.position.set(x, 0, z);
+  g.position.set(x, floorY(x, z), z);
   scene.add(g);
 }
 for (let i = 0; i < 110; i++) {
@@ -360,11 +503,13 @@ function makeFish(bodyColor, finColor, size = 1) {
   const topFin = makeDorsalFin(finColor, 0.55);
   topFin.position.set(0.1, 0.8, 0);
   g.add(topFin);
+  const fins = [tail, topFin];
   for (const side of [-1, 1]) {
     const fin = makeSideFin(finColor, 0.75);
     fin.position.set(0.35, -0.15, side * 0.6);
     fin.rotation.x = -side * 0.8; // flare outward from the body
     g.add(fin);
+    fins.push(fin);
     addKawaiiEye(g, 0.85, 0.3, side * 0.45, 0.28);
   }
   addBlush(g, 1.0, -0.05, 0.55, 0.14);
@@ -375,12 +520,22 @@ function makeFish(bodyColor, finColor, size = 1) {
   mouth.rotation.z = Math.PI;
   g.add(mouth);
   g.scale.setScalar(size);
-  return { group: g, tail };
+  return { group: g, tail, body, fins };
 }
 
 const START_POS = new THREE.Vector3(0, 4, 88);
 const START_YAW = Math.PI / 2; // fish model faces +x; this heading points it at the world center (-z)
-const playerParts = makeFish(0xffa94d, 0xff7b54, 0.9);
+
+// pick-your-fish colors (body, fins) — wired to the start-screen swatches below
+const FISH_COLORS = [
+  { name: 'sunny',  body: 0xffa94d, fin: 0xff7b54 },
+  { name: 'pinky',  body: 0xff9ecd, fin: 0xe64980 },
+  { name: 'grape',  body: 0xb197fc, fin: 0x7048e8 },
+  { name: 'splash', body: 0x74c0fc, fin: 0x1c7ed6 },
+  { name: 'minty',  body: 0x8ce99a, fin: 0x37b24d },
+  { name: 'sunny2', body: 0xffe066, fin: 0xf59f00 },
+];
+const playerParts = makeFish(FISH_COLORS[0].body, FISH_COLORS[0].fin, 0.9);
 const player = playerParts.group;
 player.rotation.order = 'YZX'; // yaw, then pitch, then bank — intrinsic for a +x-facing model
 player.position.copy(START_POS);
@@ -424,6 +579,95 @@ GEM_SPOTS.forEach(([x, y, z], i) => {
   scene.add(gem);
   gems.push({ mesh: gem, collected: false, baseY: y });
 });
+
+// compass sparkles: a trail of glowing dots leading toward the next goal
+const compassDots = [];
+{
+  for (let i = 0; i < 5; i++) {
+    const d = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.22 - i * 0.02),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85 })
+    );
+    d.visible = false;
+    scene.add(d);
+    compassDots.push(d);
+  }
+}
+
+// burst of sparkles when something wonderful happens
+const burstPool = [];
+{
+  for (let i = 0; i < 26; i++) {
+    const p = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.16),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 1 })
+    );
+    p.visible = false;
+    p.userData.vel = new THREE.Vector3();
+    p.userData.life = 0;
+    scene.add(p);
+    burstPool.push(p);
+  }
+}
+function sparkleBurst(pos, color) {
+  for (const p of burstPool) {
+    p.visible = true;
+    p.userData.life = 1;
+    p.material.color.set(color);
+    p.material.opacity = 1;
+    p.position.copy(pos);
+    p.userData.vel.set(rand(-1, 1), rand(-0.4, 1), rand(-1, 1)).normalize().multiplyScalar(rand(4, 9));
+  }
+}
+
+// the treasure chest that appears when all 4 gems are found
+const chest = new THREE.Group();
+const chestLid = new THREE.Group();
+const crown = new THREE.Group();
+{
+  const wood = mat(0x9a6633);
+  const gold = mat(0xffd43b, { metalness: 0.6, roughness: 0.3 });
+  const base = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.1, 1.5), wood);
+  base.position.y = 0.55;
+  chest.add(base);
+  const band = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.22, 1.6), gold);
+  band.position.y = 0.85;
+  chest.add(band);
+  // lid pivots along the back top edge
+  const lidBox = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.75, 2.2, 16, 1, false, 0, Math.PI), wood);
+  lidBox.rotation.z = Math.PI / 2;
+  lidBox.position.set(0, 0, 0.75);
+  chestLid.position.set(0, 1.1, -0.75);
+  chestLid.add(lidBox);
+  chest.add(chestLid);
+  const glow = new THREE.PointLight(0xffe066, 0, 12); // lights up when it opens
+  glow.position.y = 1.4;
+  chest.add(glow);
+  chest.userData.glow = glow;
+  chest.visible = false;
+  scene.add(chest);
+
+  // the royal crown inside
+  const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.46, 0.3, 12, 1, true), gold);
+  crown.add(ring);
+  const top = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.06, 12), gold);
+  top.position.y = 0.12;
+  crown.add(top);
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * Math.PI * 2;
+    const spike = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.3, 8), gold);
+    spike.position.set(Math.cos(a) * 0.4, 0.3, Math.sin(a) * 0.4);
+    crown.add(spike);
+    const jewel = new THREE.Mesh(
+      new THREE.SphereGeometry(0.07, 8, 8),
+      new THREE.MeshStandardMaterial({ color: [0xff6b6b, 0x59d4ff, 0x7dff8a][i % 3], emissive: [0xff6b6b, 0x59d4ff, 0x7dff8a][i % 3], emissiveIntensity: 0.5 })
+    );
+    jewel.position.set(Math.cos(a) * 0.4, 0.48, Math.sin(a) * 0.4);
+    crown.add(jewel);
+  }
+  crown.visible = false;
+  scene.add(crown);
+}
 
 // ----------------------------- sharks -----------------------------
 function makeShark() {
@@ -486,13 +730,18 @@ function makeTextSprite(text) {
   return sp;
 }
 
+// a pool of 6 sharks — higher levels wake up more of them
 const sharks = [];
 [
   { home: [-40, -40], range: 38 },
   { home: [45, 0], range: 36 },
   { home: [0, 45], range: 40 },
+  { home: [55, -55], range: 34 },
+  { home: [-60, 25], range: 34 },
+  { home: [25, 65], range: 32 },
 ].forEach(({ home, range }) => {
   const mesh = makeShark();
+  mesh.rotation.order = 'YZX'; // so rotation.x barrel-rolls around its own long axis
   mesh.position.set(home[0], rand(3, 7), home[1]);
   scene.add(mesh);
   sharks.push({
@@ -503,8 +752,19 @@ const sharks = [];
     state: 'patrol',           // patrol | chase | nap
     speed: rand(6.5, 7.5),
     newTargetTimer: 0,
+    active: true,
+    spin: 0,                   // celebratory barrel roll after a chomp
   });
 });
+
+// levels: more sharks, faster sharks, shorter naps
+function levelCfg(l) {
+  return {
+    sharkCount: Math.min(2 + l, 6),
+    speedMult: 1 + (l - 1) * 0.12,
+    napDur: Math.max(3, 5 - (l - 1) * 0.5),
+  };
+}
 
 function pickPatrolTarget(shark) {
   // wander near home but never inside a coral hideout (sharks don't like coral!)
@@ -667,6 +927,148 @@ function makeTurtle(x, z) {
 makeTurtle(0, 0);
 makeTurtle(-40, 50);
 
+// a big gentle whale slowly circling high above the reef
+{
+  const g = new THREE.Group();
+  const color = 0x8fc1e8;
+  const body = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 18), mat(color));
+  body.scale.set(3.6, 1.6, 1.5);
+  g.add(body);
+  const belly = new THREE.Mesh(new THREE.SphereGeometry(0.97, 24, 18), mat(0xeaf6ff));
+  belly.scale.set(3.45, 1.45, 1.35);
+  belly.position.y = -0.35;
+  g.add(belly);
+  const fluke = makeTailFin(color, 1.9);
+  fluke.rotation.x = Math.PI / 2; // whale tails are horizontal
+  fluke.position.set(-3.7, 0.2, 0);
+  g.add(fluke);
+  for (const side of [-1, 1]) {
+    const flipper = new THREE.Mesh(new THREE.SphereGeometry(0.6, 12, 10), mat(color));
+    flipper.scale.set(1.6, 0.3, 0.8);
+    flipper.position.set(0.8, -0.9, side * 1.3);
+    flipper.rotation.z = -0.3;
+    g.add(flipper);
+    addKawaiiEye(g, 2.4, 0.35, side * 1.05, 0.32);
+  }
+  addBlush(g, 2.7, -0.1, 1.25, 0.2);
+  const whaleSmile = new THREE.Mesh(new THREE.TorusGeometry(0.5, 0.08, 6, 14, Math.PI), mat(0x33202a));
+  whaleSmile.position.set(3.35, -0.25, 0);
+  whaleSmile.rotation.y = Math.PI / 2;
+  whaleSmile.rotation.z = Math.PI;
+  g.add(whaleSmile);
+  scene.add(g);
+  friends.push({
+    group: g,
+    update(t) {
+      const a = t * 0.045;
+      g.position.set(Math.cos(a) * 58, 17 + Math.sin(t * 0.4) * 1.5, Math.sin(a) * 58);
+      g.rotation.y = -a - Math.PI / 2;
+      fluke.rotation.z = Math.sin(t * 1.2) * 0.25; // slow happy fluke flaps
+    },
+  });
+}
+
+// seahorses bobbing near their favorite coral
+function makeSeahorse(x, z, color) {
+  const g = new THREE.Group();
+  const belly = new THREE.Mesh(new THREE.SphereGeometry(0.45, 14, 12), mat(color));
+  belly.scale.set(0.8, 1.2, 0.7);
+  g.add(belly);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.3, 12, 10), mat(color));
+  head.position.set(0.12, 0.72, 0);
+  g.add(head);
+  const snout = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.11, 0.45, 8), mat(color));
+  snout.rotation.z = -Math.PI / 2.3;
+  snout.position.set(0.42, 0.66, 0);
+  g.add(snout);
+  const crest = makeDorsalFin(color, 0.4);
+  crest.rotation.z = -0.5;
+  crest.position.set(-0.15, 0.95, 0);
+  g.add(crest);
+  // curly tail
+  const curl = new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.09, 8, 14, 4.6), mat(color));
+  curl.position.set(0.05, -0.62, 0);
+  curl.rotation.z = 2.4;
+  g.add(curl);
+  for (const side of [-1, 1]) addKawaiiEye(g, 0.28, 0.78, side * 0.18, 0.1);
+  g.position.set(x, 2.2, z);
+  scene.add(g);
+  const baseY = 2.2, phase = rand(0, Math.PI * 2);
+  friends.push({
+    group: g,
+    update(t) {
+      g.position.y = baseY + Math.sin(t * 1.3 + phase) * 0.7;
+      g.rotation.y = Math.sin(t * 0.4 + phase) * 0.9;
+    },
+  });
+}
+makeSeahorse(-52, 55, 0xffd43b);
+makeSeahorse(62, -50, 0xff9ecd);
+makeSeahorse(-70, -5, 0x9df9ef);
+
+// little crabs scuttling sideways on the sand
+function makeCrab(x, z, color) {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.55, 14, 12), mat(color));
+  body.scale.set(1.2, 0.7, 1);
+  body.position.y = 0.45;
+  g.add(body);
+  const legs = [];
+  for (const side of [-1, 1]) {
+    for (let i = 0; i < 3; i++) {
+      const leg = new THREE.Mesh(new THREE.CapsuleGeometry(0.05, 0.5, 3, 6), mat(color));
+      leg.position.set((i - 1) * 0.35, 0.25, side * 0.6);
+      leg.rotation.x = side * 0.9;
+      g.add(leg);
+      legs.push(leg);
+    }
+    const claw = new THREE.Mesh(new THREE.SphereGeometry(0.18, 10, 8), mat(color));
+    claw.position.set(0.6, 0.45, side * 0.35);
+    g.add(claw);
+    // eyes on little stalks
+    const stalk = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.3, 6), mat(color));
+    stalk.position.set(0.35, 0.85, side * 0.2);
+    g.add(stalk);
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.11, 10, 8), mat(0xffffff, { roughness: 0.25 }));
+    eye.position.set(0.35, 1.02, side * 0.2);
+    g.add(eye);
+    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 8), mat(0x2b2b3d));
+    pupil.position.set(0.42, 1.04, side * 0.2);
+    g.add(pupil);
+  }
+  addBlush(g, 0.5, 0.35, 0.5, 0.09);
+  g.position.set(x, floorY(x, z), z);
+  scene.add(g);
+  const phase = rand(0, Math.PI * 2), range = rand(4, 8);
+  friends.push({
+    group: g,
+    update(t) {
+      g.position.z = z + Math.sin(t * 0.6 + phase) * range; // scuttle sideways!
+      g.position.y = floorY(g.position.x, g.position.z); // stay on the dunes
+      for (let i = 0; i < legs.length; i++) legs[i].rotation.z = Math.sin(t * 8 + i * 1.3) * 0.25;
+    },
+  });
+}
+makeCrab(15, 55, 0xff6b6b);
+makeCrab(-45, -20, 0xff9671);
+makeCrab(50, 30, 0xffa8a8);
+makeCrab(-10, -60, 0xff8787);
+
+// clownfish circling their anemone homes
+for (const spot of anemoneSpots.slice(0, 4)) {
+  const nemo = makeFish(0xff7f2a, 0xffffff, 0.35).group;
+  scene.add(nemo);
+  const phase = rand(0, Math.PI * 2), r = rand(1.6, 2.4), speed = rand(0.8, 1.4);
+  friends.push({
+    group: nemo,
+    update(t) {
+      const a = t * speed + phase;
+      nemo.position.set(spot.x + Math.cos(a) * r, 1.4 + Math.sin(t * 2 + phase) * 0.3, spot.z + Math.sin(a) * r);
+      nemo.rotation.y = -a - Math.PI / 2;
+    },
+  });
+}
+
 // a school of tiny neutral fish swimming in a lazy circle
 {
   const school = new THREE.Group();
@@ -699,20 +1101,56 @@ const hiddenBadge = document.getElementById('hidden-badge');
 const messageEl = document.getElementById('message');
 const startBtn = document.getElementById('start-btn');
 
+const hudLevel = document.getElementById('level');
+
 const state = {
   running: false,
   lives: 3,
+  level: 1,
+  fishName: 'Little Fish',
   gemsCollected: 0,
   speedBoost: false,     // 1st gem
   napTimer: 0,           // 2nd gem: sharks nap
   sparkles: false,       // 3rd gem
   invulnerable: 0,
   gameOver: false,
+  shake: 0,              // camera shake after a chomp
+  rollTimer: 0,          // happy barrel roll after a gem
+  chestPhase: null,      // null | 'placed' | 'opening' | 'crown'
+  chestTimer: 0,
 };
 
 function updateHud() {
   hudLives.textContent = '❤️'.repeat(state.lives) + '🖤'.repeat(3 - state.lives);
+  hudLevel.textContent = '⭐ Level ' + state.level;
   gemSlots.forEach((slot, i) => slot.classList.toggle('got', i < state.gemsCollected));
+}
+
+// ---------- pick-your-fish (start screen only; choice is remembered) ----------
+const nameInputEl = document.getElementById('fish-name');
+let fishColorIdx = parseInt(localStorage.getItem('fishColor') || '0', 10);
+if (!(fishColorIdx >= 0 && fishColorIdx < FISH_COLORS.length)) fishColorIdx = 0;
+function applyFishColors() {
+  const c = FISH_COLORS[fishColorIdx];
+  playerParts.body.material.color.set(c.body);
+  playerParts.fins.forEach(f => f.material.color.set(c.fin));
+}
+{
+  const swatchesEl = document.getElementById('swatches');
+  FISH_COLORS.forEach((c, i) => {
+    const sw = document.createElement('div');
+    sw.className = 'swatch' + (i === fishColorIdx ? ' sel' : '');
+    sw.style.background = `linear-gradient(135deg, #${c.body.toString(16).padStart(6, '0')}, #${c.fin.toString(16).padStart(6, '0')})`;
+    sw.addEventListener('click', () => {
+      fishColorIdx = i;
+      localStorage.setItem('fishColor', String(i));
+      applyFishColors();
+      swatchesEl.querySelectorAll('.swatch').forEach((el, j) => el.classList.toggle('sel', j === i));
+    });
+    swatchesEl.appendChild(sw);
+  });
+  if (nameInputEl) nameInputEl.value = localStorage.getItem('fishName') || '';
+  applyFishColors();
 }
 
 let powerupTimeout = null;
@@ -734,7 +1172,7 @@ function showMessage(title, lines, buttonText, onClick) {
   document.getElementById('msg-btn').addEventListener('click', onClick);
 }
 
-function resetGame() {
+function resetGame(level = 1) {
   // iOS/Android only allow sound after a user gesture — the start tap is one
   try {
     audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
@@ -742,30 +1180,50 @@ function resetGame() {
   } catch (e) { /* sound is optional */ }
   state.running = true;
   state.lives = 3;
+  state.level = level;
   state.gemsCollected = 0;
   state.speedBoost = false;
   state.napTimer = 0;
   state.sparkles = false;
   state.invulnerable = 0;
   state.gameOver = false;
+  state.shake = 0;
+  state.rollTimer = 0;
+  state.chestPhase = null;
+  chest.visible = false;
+  chest.userData.glow.intensity = 0;
+  chestLid.rotation.x = 0;
+  crown.visible = false;
+  player.remove(crown);
   player.position.copy(START_POS);
   player.rotation.y = START_YAW;
   gems.forEach(g => { g.collected = false; g.mesh.visible = true; });
-  sharks.forEach(s => {
+  const cfg = levelCfg(level);
+  sharks.forEach((s, i) => {
+    s.active = i < cfg.sharkCount;
+    s.mesh.visible = s.active;
     s.state = 'patrol';
+    s.spin = 0;
+    s.mesh.rotation.x = 0;
     s.mesh.position.copy(s.home);
     s.target = pickPatrolTarget(s);
     s.mesh.userData.zzz.visible = false;
   });
   updateHud();
   messageEl.classList.remove('show');
+  showPowerup(`🌊 Go, ${state.fishName}! Level ${level} — find the 4 gems! 💎`);
 }
 
-startBtn.addEventListener('click', resetGame);
+startBtn.addEventListener('click', () => {
+  state.fishName = (nameInputEl && nameInputEl.value.trim().slice(0, 14)) || 'Little Fish';
+  localStorage.setItem('fishName', state.fishName === 'Little Fish' ? '' : state.fishName);
+  resetGame(1);
+});
 
 // ----------------------------- input -----------------------------
 const keys = {};
 window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return; // let the name box have its letters
   keys[e.code] = true;
   if ([ 'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight' ].includes(e.code)) e.preventDefault();
 });
@@ -817,21 +1275,37 @@ function collectGem(gem) {
   state.gemsCollected++;
   updateHud();
   sfx.gem();
+  sparkleBurst(gem.mesh.position, gem.mesh.material.color);
+  state.rollTimer = 0.7; // happy barrel roll!
 
   if (state.gemsCollected === 1) {
     state.speedBoost = true;
     showPowerup('💎 First gem! ⚡ You can swim SUPER FAST now!');
   } else if (state.gemsCollected === 2) {
-    state.napTimer = 5;
-    sharks.forEach(s => { s.state = 'nap'; s.mesh.userData.zzz.visible = true; });
+    const nap = levelCfg(state.level).napDur;
+    state.napTimer = nap;
+    sharks.forEach(s => { if (s.active) { s.state = 'nap'; s.mesh.userData.zzz.visible = true; } });
     sfx.nap();
-    showPowerup('💎 Second gem! 😴 The sharks fell asleep — 5 second head start!');
+    showPowerup(`💎 Second gem! 😴 The sharks fell asleep — ${Math.round(nap)} second head start!`);
   } else if (state.gemsCollected === 3) {
     state.sparkles = true;
     showPowerup('💎 Third gem! ✨ You leave a sparkle trail! One more to go!');
   } else if (state.gemsCollected >= 4) {
-    winGame();
+    placeChest();
   }
+}
+
+// all 4 gems → a treasure chest appears; swim to it for the crown!
+function placeChest() {
+  const dir = new THREE.Vector3(Math.cos(player.rotation.y), 0, -Math.sin(player.rotation.y));
+  chest.position.copy(player.position).addScaledVector(dir, 14);
+  chest.position.x = clamp(chest.position.x, -85, 85);
+  chest.position.z = clamp(chest.position.z, -85, 85);
+  chest.position.y = floorY(chest.position.x, chest.position.z);
+  chest.rotation.y = Math.atan2(player.position.x - chest.position.x, player.position.z - chest.position.z);
+  chest.visible = true;
+  state.chestPhase = 'placed';
+  showPowerup('💎 All 4 gems! A treasure chest appeared — follow the sparkles! ✨', 5000);
 }
 
 function winGame() {
@@ -839,27 +1313,31 @@ function winGame() {
   state.gameOver = true;
   sfx.win();
   showMessage(
-    '🎉 YOU WIN! 🎉',
-    ['You collected all 4 gems! 💎💎💎💎', 'The sharks never caught you. You are the best fish in the sea! 🐠👑'],
-    'Play Again! 🌊',
-    resetGame
+    `🎉 LEVEL ${state.level} COMPLETE! 🎉`,
+    [`${state.fishName} found the royal crown! 👑`,
+     `All 4 gems collected — you are the best fish in the sea! 🐠`,
+     `Ready for Level ${state.level + 1}? ${levelCfg(state.level + 1).sharkCount} sharks are waiting…`],
+    `Level ${state.level + 1}! 🌊`,
+    () => resetGame(state.level + 1)
   );
 }
 
-function loseLife() {
+function loseLife(chompingShark) {
   if (state.invulnerable > 0 || !state.running) return;
   state.lives--;
   updateHud();
   sfx.hit();
+  state.shake = 0.6; // camera shake!
+  if (chompingShark) chompingShark.spin = 1; // the shark does a proud barrel roll
   if (state.lives <= 0) {
     state.running = false;
     state.gameOver = true;
     sfx.lose();
     showMessage(
       '🦈 Chomp! Game Over',
-      ['The sharks got you this time…', 'But brave fish always try again!'],
-      'Try Again! 💪',
-      resetGame
+      [`The sharks got ${state.fishName} this time…`, 'But brave fish always try again!'],
+      `Try Level ${state.level} Again! 💪`,
+      () => resetGame(state.level)
     );
     return;
   }
@@ -875,6 +1353,7 @@ function loseLife() {
 const clock = new THREE.Clock();
 const camTarget = new THREE.Vector3();
 let camYaw = START_YAW; // follows the player's heading smoothly
+let playerBank = 0;     // turn-banking, kept separate so barrel rolls can stack on top
 
 function animate() {
   requestAnimationFrame(animate);
@@ -904,6 +1383,36 @@ function animate() {
     g.mesh.rotation.y += dt * 1.5;
     g.mesh.position.y = g.baseY + Math.sin(t * 2 + g.baseY) * 0.5;
   }
+  // sparkle bursts fly out, drift down, and fade
+  for (const p of burstPool) {
+    if (p.userData.life > 0) {
+      p.userData.life -= dt * 1.4;
+      p.position.addScaledVector(p.userData.vel, dt);
+      p.userData.vel.y -= dt * 2;
+      p.rotation.y += dt * 8;
+      p.material.opacity = Math.max(p.userData.life, 0);
+      if (p.userData.life <= 0) p.visible = false;
+    }
+  }
+  // the waiting chest twinkles so it's easy to spot
+  if (chest.visible && state.chestPhase === 'placed') {
+    chest.userData.glow.intensity = 8 + Math.sin(t * 3) * 5;
+  }
+  // caustic light dances across the sand
+  causticTex.offset.set(t * 0.012, Math.sin(t * 0.35) * 0.03);
+  // sun rays gently pulse
+  for (const ray of sunRays) {
+    ray.material.opacity = 0.045 + Math.sin(t * 0.6 + ray.userData.phase) * 0.02;
+    ray.rotation.y = t * 0.05 + ray.userData.phase;
+  }
+  // marine snow drifts down and wraps around
+  for (let i = 0; i < snowPositions.length; i += 3) {
+    snowPositions[i] += Math.sin(t * 0.5 + i) * dt * 0.15;
+    snowPositions[i + 1] -= dt * 0.35;
+    if (snowPositions[i + 1] < 0) snowPositions[i + 1] = CEILING_Y;
+  }
+  snowPoints.geometry.attributes.position.needsUpdate = true;
+  if (!state.running) compassDots.forEach(d2 => { d2.visible = false; });
 
   if (state.running) {
     // ---------- player movement ----------
@@ -927,14 +1436,21 @@ function animate() {
     player.rotation.y += turn * turnSpeed * dt;
     const dir = new THREE.Vector3(Math.cos(player.rotation.y), 0, -Math.sin(player.rotation.y));
     player.position.addScaledVector(dir, forward * baseSpeed * dt);
-    player.position.y = clamp(player.position.y + vertical * baseSpeed * 0.7 * dt, 1.2, CEILING_Y);
     player.position.x = clamp(player.position.x, -95, 95);
     player.position.z = clamp(player.position.z, -95, 95);
+    const seabed = floorY(player.position.x, player.position.z) + 1.0;
+    player.position.y = clamp(player.position.y + vertical * baseSpeed * 0.7 * dt, seabed, CEILING_Y);
 
     // wiggle the tail while swimming, pitch when climbing/diving, bank into turns
     playerParts.tail.rotation.y = Math.sin(t * (Math.abs(forward) > 0.05 ? 14 : 5)) * 0.5;
     player.rotation.z = THREE.MathUtils.lerp(player.rotation.z, vertical * 0.35, 0.12);
-    player.rotation.x = THREE.MathUtils.lerp(player.rotation.x, -turn * 0.25, 0.1);
+    playerBank = THREE.MathUtils.lerp(playerBank, -turn * 0.25, 0.1);
+    let rollAngle = 0;
+    if (state.rollTimer > 0) { // happy barrel roll after grabbing a gem
+      state.rollTimer -= dt;
+      rollAngle = (1 - Math.max(state.rollTimer, 0) / 0.7) * Math.PI * 2;
+    }
+    player.rotation.x = playerBank + rollAngle;
 
     // invulnerability bubble
     if (state.invulnerable > 0) {
@@ -974,6 +1490,78 @@ function animate() {
       if (!g.collected && player.position.distanceTo(g.mesh.position) < 2.6) collectGem(g);
     }
 
+    // ---------- treasure chest finale ----------
+    if (state.chestPhase === 'placed') {
+      // horizontal distance only — the chest should open even if you hover above it
+      const dxz = Math.hypot(player.position.x - chest.position.x, player.position.z - chest.position.z);
+      if (dxz < 4.5) {
+        state.chestPhase = 'opening';
+        state.chestTimer = 0;
+        sfx.nap();
+      }
+    } else if (state.chestPhase === 'opening') {
+      state.invulnerable = Math.max(state.invulnerable, 0.5); // no chomps mid-celebration
+      state.chestTimer += dt;
+      chestLid.rotation.x = -Math.min(state.chestTimer / 0.8, 1) * 1.9;
+      chest.userData.glow.intensity = Math.min(state.chestTimer / 0.8, 1) * 30;
+      if (state.chestTimer >= 0.9) {
+        state.chestPhase = 'crown';
+        state.chestTimer = 0;
+        scene.add(crown); // re-parent from the player's head back into the world
+        crown.visible = true;
+        crown.position.copy(chest.position).add(new THREE.Vector3(0, 1.2, 0));
+        sparkleBurst(crown.position, 0xffd43b);
+      }
+    } else if (state.chestPhase === 'crown') {
+      state.invulnerable = Math.max(state.invulnerable, 0.5);
+      state.chestTimer += dt;
+      const k = Math.min(state.chestTimer / 1.2, 1);
+      const headPos = player.position.clone().add(new THREE.Vector3(0, 1.1, 0));
+      crown.position.lerpVectors(chest.position.clone().add(new THREE.Vector3(0, 1.2 + k * 3, 0)), headPos, k * k);
+      crown.rotation.y += dt * 5;
+      if (k >= 1) {
+        // the crown lands on your head! 👑
+        state.chestPhase = null;
+        crown.rotation.set(0, 0, 0);
+        crown.position.set(0.25, 1.05, 0);
+        player.add(crown);
+        sparkleBurst(headPos, 0xffd43b);
+        winGame();
+      }
+    }
+
+    // ---------- compass sparkles: point to the next goal ----------
+    {
+      let goal = null, goalColor = 0xffffff;
+      if (state.chestPhase) {
+        goal = chest.position.clone().add(new THREE.Vector3(0, 1.5, 0));
+        goalColor = 0xffd43b;
+      } else {
+        let best = Infinity;
+        for (const g of gems) {
+          if (g.collected) continue;
+          const d = player.position.distanceTo(g.mesh.position);
+          if (d < best) { best = d; goal = g.mesh.position; goalColor = g.mesh.material.color.getHex(); }
+        }
+      }
+      if (goal) {
+        const toGoal = new THREE.Vector3().subVectors(goal, player.position);
+        const dGoal = toGoal.length();
+        toGoal.normalize();
+        compassDots.forEach((d2, i) => {
+          const along = 2.5 + i * 1.1;
+          d2.visible = dGoal > 7; // hide when the goal is right there
+          d2.position.copy(player.position).addScaledVector(toGoal, Math.min(along, dGoal - 1));
+          d2.position.y += Math.sin(t * 4 + i) * 0.15;
+          d2.rotation.y = t * 3 + i;
+          d2.material.color.set(goalColor);
+          d2.material.opacity = 0.9 - i * 0.12;
+        });
+      } else {
+        compassDots.forEach(d2 => { d2.visible = false; });
+      }
+    }
+
     // ---------- sharks ----------
     if (state.napTimer > 0) {
       state.napTimer -= dt;
@@ -987,7 +1575,14 @@ function animate() {
 
     let anyChasing = false;
     for (const s of sharks) {
+      if (!s.active) continue;
       const toPlayer = player.position.distanceTo(s.mesh.position);
+
+      // proud barrel roll after a successful chomp
+      if (s.spin > 0) {
+        s.spin -= dt;
+        s.mesh.rotation.x = (1 - Math.max(s.spin, 0)) * Math.PI * 2;
+      }
 
       if (s.state === 'nap') {
         // drift gently while snoozing
@@ -1001,10 +1596,11 @@ function animate() {
       else if (s.state === 'chase') { s.state = 'patrol'; s.target = pickPatrolTarget(s); }
 
       let target, speed;
+      const mult = levelCfg(state.level).speedMult;
       if (s.state === 'chase') {
         anyChasing = true;
         target = player.position;
-        speed = s.speed * (state.speedBoost ? 1.15 : 1.25); // catchable, but the speed gem really helps
+        speed = s.speed * mult * (state.speedBoost ? 1.15 : 1.25); // catchable, but the speed gem really helps
       } else {
         s.newTargetTimer -= dt;
         if (s.mesh.position.distanceTo(s.target) < 3 || s.newTargetTimer <= 0) {
@@ -1012,7 +1608,7 @@ function animate() {
           s.newTargetTimer = rand(4, 9);
         }
         target = s.target;
-        speed = s.speed * 0.55;
+        speed = s.speed * mult * 0.55;
       }
 
       const dirToTarget = new THREE.Vector3().subVectors(target, s.mesh.position);
@@ -1028,7 +1624,7 @@ function animate() {
           const side = new THREE.Vector3(-dirToTarget.z, 0, dirToTarget.x);
           s.mesh.position.addScaledVector(side, speed * dt);
         }
-        s.mesh.position.y = clamp(s.mesh.position.y, 2, CEILING_Y - 2);
+        s.mesh.position.y = clamp(s.mesh.position.y, floorY(s.mesh.position.x, s.mesh.position.z) + 2, CEILING_Y - 2);
         const targetYaw = Math.atan2(dirToTarget.x, dirToTarget.z) - Math.PI / 2;
         let dy = targetYaw - s.mesh.rotation.y;
         while (dy > Math.PI) dy -= Math.PI * 2;
@@ -1037,7 +1633,7 @@ function animate() {
       }
       s.mesh.userData.tail.rotation.y = Math.sin(t * (s.state === 'chase' ? 16 : 8)) * 0.5;
 
-      if (toPlayer < 2.6 && !hidden) loseLife(); // coral hideouts are always safe
+      if (toPlayer < 2.6 && !hidden) loseLife(s); // coral hideouts are always safe
     }
     dangerEl.style.opacity = anyChasing && state.invulnerable <= 0 ? 1 : 0;
   }
@@ -1052,12 +1648,25 @@ function animate() {
   camera.position.y = Math.max(camera.position.y, 2);
   camTarget.lerp(player.position, 0.2);
   camera.lookAt(camTarget);
+  if (state.shake > 0) { // chomp!
+    state.shake = Math.max(0, state.shake - dt);
+    camera.position.x += (Math.random() - 0.5) * state.shake * 1.3;
+    camera.position.y += (Math.random() - 0.5) * state.shake * 1.3;
+  }
 
   renderer.render(scene, camera);
 }
+
+// every solid thing casts a shadow onto the sand (transparent effects don't)
+scene.traverse(obj => {
+  if (obj.isMesh && !obj.material.transparent && obj.material.blending === THREE.NormalBlending
+      && !obj.userData.noShadow) {
+    obj.castShadow = true;
+  }
+});
 
 updateHud();
 animate();
 
 // tiny hook for automated testing / debugging in the console
-window.__game = { state, player, sharks, gems, coralClusters, resetGame };
+window.__game = { state, player, sharks, gems, coralClusters, resetGame, chest, crown, playerParts };
