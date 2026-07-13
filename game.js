@@ -936,76 +936,140 @@ function levelCfg(l) {
 }
 const SCARE_DURATION = 10; // 2nd gem: the dragon scares the sharks away for 10 seconds
 
-// ----------------------------- the friendly dragon -----------------------------
-// summoned by the 2nd gem; it swoops in and frightens every shark away
+// ----------------------------- the sea-dragon king -----------------------------
+// A serpentine East-Asian dragon (à la the North Sea Dragon King) — no wings,
+// a long undulating body, flowing whiskers, a golden mane and antlers.
+// Summoned by the 2nd gem; it swoops across the screen and scares the sharks.
+const DRAGON_SEGMENTS = 16;
 function makeDragon() {
   const g = new THREE.Group();
-  const green = 0x4fc76a, belly = 0xd6f5b0;
-  const body = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 16), mat(green));
-  body.scale.set(2.4, 1.2, 1.1);
-  g.add(body);
-  const tummy = new THREE.Mesh(new THREE.SphereGeometry(0.97, 20, 16), mat(belly));
-  tummy.scale.set(2.2, 1.0, 0.95);
-  tummy.position.y = -0.3;
-  g.add(tummy);
-  // long curvy neck + head reaching forward
-  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.7, 1.6, 12), mat(green));
-  neck.rotation.z = -Math.PI / 2.6;
-  neck.position.set(2.0, 0.6, 0);
-  g.add(neck);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.75, 16, 14), mat(green));
-  head.position.set(2.9, 1.15, 0);
-  g.add(head);
-  const snout = new THREE.Mesh(new THREE.SphereGeometry(0.5, 14, 12), mat(green));
-  snout.scale.set(1.3, 0.8, 0.9);
-  snout.position.set(3.5, 1.0, 0);
-  g.add(snout);
+  const teal = 0x2ea6c9, belly = 0xdff6ff, gold = 0xffd23f, red = 0xe8433a;
+  const goldMat = mat(gold, { metalness: 0.5, roughness: 0.35 });
+
+  // ---- long serpent body: a chain of segments the animation undulates ----
+  const segments = [];
+  const spacing = 0.92;
+  for (let i = 0; i < DRAGON_SEGMENTS; i++) {
+    const seg = new THREE.Group();
+    const taper = 1 - i / (DRAGON_SEGMENTS + 3); // thick near the head, thin at the tail
+    const r = 0.62 * taper + 0.12;
+    const scale = new THREE.Mesh(new THREE.SphereGeometry(r, 16, 12), mat(teal));
+    scale.scale.set(1, 1.05, 1);
+    seg.add(scale);
+    const bellyM = new THREE.Mesh(new THREE.SphereGeometry(r * 0.82, 14, 10), mat(belly));
+    bellyM.position.set(0.1, -r * 0.42, 0);
+    bellyM.scale.set(1, 0.7, 0.9);
+    seg.add(bellyM);
+    // little golden dorsal frill running down the spine
+    const frill = new THREE.Mesh(new THREE.ConeGeometry(0.1 + 0.12 * taper, 0.34 + 0.3 * taper, 5), goldMat);
+    frill.position.y = r + 0.05;
+    seg.add(frill);
+    seg.userData.baseX = -i * spacing;
+    seg.position.set(seg.userData.baseX, 0, 0);
+    g.add(seg);
+    segments.push(seg);
+  }
+  g.userData.segments = segments;
+
+  // ---- head (built at the +x front, ahead of segment 0) ----
+  const head = new THREE.Group();
+  head.position.set(0.95, 0, 0);
+  const skull = new THREE.Mesh(new THREE.SphereGeometry(0.8, 18, 16), mat(teal));
+  skull.scale.set(1.15, 1.0, 1.0);
+  head.add(skull);
+  const snout = new THREE.Mesh(new THREE.SphereGeometry(0.5, 14, 12), mat(teal));
+  snout.scale.set(1.5, 0.85, 0.95);
+  snout.position.set(0.8, -0.12, 0);
+  head.add(snout);
+  const nose = new THREE.Mesh(new THREE.SphereGeometry(0.5, 12, 10), mat(belly));
+  nose.scale.set(1.2, 0.55, 0.8);
+  nose.position.set(1.0, -0.28, 0);
+  head.add(nose);
+  // big grin
+  const grin = new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.06, 8, 16, Math.PI), mat(0x7a1f1f));
+  grin.position.set(0.95, -0.3, 0);
+  grin.rotation.y = Math.PI / 2;
+  head.add(grin);
   for (const side of [-1, 1]) {
-    addKawaiiEye(g, 3.15, 1.45, side * 0.42, 0.24);
-    // little horns
-    const horn = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.5, 8), mat(0xfff1c1));
-    horn.position.set(2.7, 1.85, side * 0.3);
-    horn.rotation.z = side * 0.2;
-    g.add(horn);
-    // wings
-    const wing = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 10), mat(0x8be0a0, { roughness: 0.7 }));
-    wing.scale.set(1.4, 0.15, 2.0);
-    wing.position.set(-0.3, 0.9, side * 1.6);
-    wing.rotation.x = side * 0.5;
-    g.add(wing);
-    g.userData[`wing${side < 0 ? 'L' : 'R'}`] = wing;
+    addKawaiiEye(head, 0.35, 0.42, side * 0.5, 0.26);
+    // bushy golden eyebrow
+    const brow = new THREE.Mesh(new THREE.SphereGeometry(0.2, 10, 8), goldMat);
+    brow.scale.set(1.3, 0.5, 0.7);
+    brow.position.set(0.45, 0.72, side * 0.42);
+    head.add(brow);
+    // branching antler (deer-like, not a horn)
+    const antler = new THREE.Group();
+    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.11, 0.9, 8), goldMat);
+    beam.position.y = 0.45;
+    antler.add(beam);
+    for (const t2 of [0.35, 0.7]) {
+      const tine = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.07, 0.45, 6), goldMat);
+      tine.position.set(side * 0.12, t2, 0);
+      tine.rotation.z = side * -0.7;
+      antler.add(tine);
+    }
+    antler.position.set(-0.15, 0.72, side * 0.34);
+    antler.rotation.z = side * 0.25;
+    head.add(antler);
+    // long flowing whisker
+    const whisker = new THREE.Mesh(new THREE.CapsuleGeometry(0.05, 2.4, 4, 8), mat(0xfff6d8));
+    whisker.position.set(0.9, -0.05, side * 0.4);
+    whisker.rotation.z = Math.PI / 2;
+    whisker.userData.side = side;
+    head.add(whisker);
+    if (!g.userData.whiskers) g.userData.whiskers = [];
+    g.userData.whiskers.push(whisker);
   }
-  // fiery breath puff (shown while roaring)
-  const fire = new THREE.Mesh(
-    new THREE.ConeGeometry(0.5, 1.6, 12),
-    new THREE.MeshBasicMaterial({ color: 0xff9636, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false })
-  );
-  fire.rotation.z = -Math.PI / 2;
-  fire.position.set(4.6, 0.95, 0);
-  g.add(fire);
-  g.userData.fire = fire;
-  // spiky back ridge
-  for (let i = -2; i <= 2; i++) {
-    const spike = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.5, 6), mat(0xfff1c1));
-    spike.position.set(i * 0.6 - 0.2, 1.15, 0);
-    g.add(spike);
+  // red mane / frill collar behind the head
+  const mane = new THREE.Group();
+  for (let i = 0; i < 9; i++) {
+    const a = (i / 8) * Math.PI - Math.PI / 2;
+    const tuft = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.8, 6), mat(red));
+    tuft.position.set(-0.35, Math.cos(a) * 0.7, Math.sin(a) * 0.7);
+    tuft.rotation.z = Math.PI / 2 + 0.3;
+    tuft.rotation.x = a;
+    mane.add(tuft);
   }
-  const tail = makeTailFin(green, 1.2);
-  tail.position.x = -2.4;
-  tail.rotation.z = Math.PI / 2; // vertical dragon tail-fin
+  head.add(mane);
+  g.userData.mane = mane;
+  g.add(head);
+  g.userData.head = head;
+
+  // ---- flowing tail fin at the very end ----
+  const tail = makeTailFin(gold, 1.1);
+  tail.position.x = -DRAGON_SEGMENTS * spacing;
+  tail.rotation.z = Math.PI / 2; // vertical, flowing
   g.add(tail);
-  g.scale.setScalar(1.5);
+  g.userData.tail = tail;
+
+  g.scale.setScalar(1.35);
   g.visible = false;
   scene.add(g);
   return g;
 }
 const dragon = makeDragon();
 
-// 2nd gem: the dragon swoops in and frightens every shark
+// undulate the serpent body (called every frame while the dragon is visible)
+function animateDragon(t) {
+  const segs = dragon.userData.segments;
+  for (let i = 0; i < segs.length; i++) {
+    const s = segs[i];
+    const w = i * 0.6;
+    s.position.x = s.userData.baseX;
+    s.position.z = Math.sin(t * 6 - w) * (0.35 + i * 0.05); // side-to-side ripple, bigger toward tail
+    s.position.y = Math.cos(t * 6 - w) * (0.18 + i * 0.02); // gentle vertical weave
+  }
+  if (dragon.userData.head) dragon.userData.head.rotation.z = Math.sin(t * 6) * 0.12;
+  for (const wk of dragon.userData.whiskers) wk.rotation.x = Math.sin(t * 4 + wk.userData.side) * 0.4;
+  dragon.userData.tail.position.z = Math.sin(t * 6 - DRAGON_SEGMENTS * 0.6) * 1.0;
+}
+
+// 2nd gem: the dragon makes a grand entrance across the screen, then guards you
+const FLYBY_DUR = 2.8; // seconds the dragon spends sweeping through the viewport
 function summonDragon() {
   state.scareTimer = SCARE_DURATION;
-  const dir = new THREE.Vector3(Math.cos(player.rotation.y), 0, -Math.sin(player.rotation.y));
-  dragon.position.copy(player.position).addScaledVector(dir, 10).add(new THREE.Vector3(0, 6, 0));
+  state.dragonPhase = 'flyby';
+  state.dragonT = 0;
   dragon.visible = true;
   sharks.forEach(s => {
     if (s.active) {
@@ -1388,6 +1452,8 @@ const state = {
   gemsCollected: 0,
   speedBoost: false,     // 1st gem
   scareTimer: 0,         // 2nd gem: a dragon scares the sharks away
+  dragonPhase: null,     // null | 'flyby' | 'guard'
+  dragonT: 0,            // flyby progress timer
   sparkles: false,       // 3rd gem
   invulnerable: 0,
   gameOver: false,
@@ -1536,7 +1602,10 @@ function resetGame(level = 1, keepScore = false) {
   state.gemsCollected = 0;
   state.speedBoost = false;
   state.scareTimer = 0;
+  state.dragonPhase = null;
+  state.dragonT = 0;
   dragon.visible = false;
+  dragon.rotation.z = 0;
   state.sparkles = false;
   state.invulnerable = 0;
   state.gameOver = false;
@@ -2043,22 +2112,45 @@ function animate() {
     // ---------- dragon scare (2nd gem) ----------
     if (state.scareTimer > 0) {
       state.scareTimer -= dt;
-      // the dragon circles protectively over the player, roaring
-      const a = t * 1.1;
-      dragon.position.x += ((player.position.x + Math.cos(a) * 12) - dragon.position.x) * Math.min(1, dt * 2);
-      dragon.position.z += ((player.position.z + Math.sin(a) * 12) - dragon.position.z) * Math.min(1, dt * 2);
-      dragon.position.y += ((player.position.y + 7) - dragon.position.y) * Math.min(1, dt * 2);
-      dragon.rotation.y = -a - Math.PI / 2;
-      const flap = Math.sin(t * 8) * 0.5;
-      if (dragon.userData.wingL) { dragon.userData.wingL.rotation.x = 0.5 + flap; dragon.userData.wingR.rotation.x = -0.5 - flap; }
-      dragon.userData.fire.scale.setScalar(0.8 + Math.sin(t * 20) * 0.3);
-      dragon.userData.fire.material.opacity = 0.6 + Math.sin(t * 25) * 0.25;
+      animateDragon(t);
+      // screen axes so the flyby always crosses the camera view
+      const fwd = new THREE.Vector3(Math.cos(camYaw), 0, -Math.sin(camYaw));
+      const right = new THREE.Vector3(Math.sin(camYaw), 0, Math.cos(camYaw));
+
+      if (state.dragonPhase === 'flyby') {
+        state.dragonT += dt;
+        const p = Math.min(state.dragonT / FLYBY_DUR, 1);
+        // sweep from the left edge to the right edge, arcing up and dipping
+        // toward the camera at mid-screen so it fills the viewport
+        const lateral = (p - 0.5) * 2;             // -1 → +1
+        const ahead = 20 - Math.sin(p * Math.PI) * 9; // comes closer at center
+        const rise = 2 + Math.sin(p * Math.PI) * 4;
+        dragon.position.copy(player.position)
+          .addScaledVector(fwd, ahead)
+          .addScaledVector(right, lateral * 26);
+        dragon.position.y = player.position.y + rise;
+        dragon.rotation.y = camYaw - Math.PI / 2;  // face along its travel (screen-rightward)
+        dragon.rotation.z = Math.sin(p * Math.PI) * 0.3; // playful bank through the middle
+        if (p >= 1) { state.dragonPhase = 'guard'; }
+      } else {
+        // circle protectively over the player for the rest of the head-start
+        dragon.rotation.z = 0;
+        const a = t * 1.1;
+        const target = player.position.clone()
+          .addScaledVector(right, Math.cos(a) * 13)
+          .addScaledVector(fwd, Math.sin(a) * 13);
+        target.y = player.position.y + 7;
+        dragon.position.lerp(target, Math.min(1, dt * 2));
+        dragon.rotation.y = -a - Math.PI / 2 + camYaw;
+      }
+
       if (state.scareTimer <= 0) {
         sharks.forEach(s => {
           if (s.state === 'scared') { s.state = 'patrol'; relocateShark(s, player.position.x, player.position.z); s.mesh.userData.scared.visible = false; }
         });
         dragon.visible = false;
-        showPowerup('🐉 The dragon flew home… the sharks are back!', 2500);
+        state.dragonPhase = null;
+        showPowerup('🐉 The sea-dragon swam home… the sharks are back!', 2500);
       }
     }
 
