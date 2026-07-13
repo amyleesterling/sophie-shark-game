@@ -129,6 +129,8 @@ const sfx = {
   win: () => [523, 659, 784, 1046, 1318].forEach((f, i) => setTimeout(() => beep(f, 0.25, 'triangle', 0.25), i * 130)),
   lose: () => [392, 330, 262, 196].forEach((f, i) => setTimeout(() => beep(f, 0.3, 'triangle', 0.2), i * 200)),
   nap: () => { beep(500, 0.3, 'sine', 0.15, 250); },
+  // dragon roar: a big low rumble that swoops upward
+  dragon: () => { beep(90, 0.6, 'sawtooth', 0.28, 200); setTimeout(() => beep(140, 0.5, 'sawtooth', 0.22, 320), 120); setTimeout(() => beep(1100, 0.15, 'square', 0.12), 260); },
 };
 
 // ----------------------------- ocean floor & water -----------------------------
@@ -678,6 +680,76 @@ function spawnGemsForLevel(cx, cz) {
 }
 spawnGemsForLevel(0, 30); // ahead of the starting pool, for the menu backdrop
 
+// ----------------------------- the bedazzled octopus (grand finale) -----------------------------
+// after the last gem level, the objective becomes finding this one special
+// octopus, completely covered in sparkling gems
+const FINAL_GEM_LEVEL = 5; // levels 1..5 collect gems; level 6 is the finale hunt
+const bedazzled = { found: false };
+{
+  const g = new THREE.Group();
+  const purple = 0xb15bd8;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(1.5, 20, 18), mat(purple));
+  head.scale.y = 1.15;
+  head.position.y = 1.3;
+  g.add(head);
+  // big sparkly eyes + blush
+  for (const side of [-1, 1]) {
+    const white = new THREE.Mesh(new THREE.SphereGeometry(0.36, 12, 12), mat(0xffffff, { roughness: 0.25 }));
+    white.position.set(side * 0.6, 1.5, 1.2);
+    g.add(white);
+    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.21, 10, 10), mat(0x2b2b3d));
+    pupil.position.set(side * 0.6, 1.5, 1.45);
+    g.add(pupil);
+    const shine = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 8), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+    shine.position.set(side * 0.52, 1.63, 1.6);
+    g.add(shine);
+    const cheek = new THREE.Mesh(new THREE.SphereGeometry(0.19, 8, 8), mat(0xff9eb5, { roughness: 1 }));
+    cheek.scale.y = 0.6;
+    cheek.position.set(side * 1.05, 1.12, 1.05);
+    g.add(cheek);
+  }
+  const smile = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.05, 6, 12, Math.PI), mat(0x883344));
+  smile.position.set(0, 1.2, 1.45);
+  smile.rotation.z = Math.PI;
+  g.add(smile);
+  // eight wiggly tentacles
+  const bTentacles = [];
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    const t = new THREE.Mesh(new THREE.CapsuleGeometry(0.2, 1.8, 4, 8), mat(purple));
+    t.position.set(Math.cos(a) * 0.9, 0.1, Math.sin(a) * 0.9);
+    t.rotation.z = Math.cos(a) * 0.5;
+    t.rotation.x = -Math.sin(a) * 0.5;
+    g.add(t);
+    bTentacles.push({ mesh: t, angle: a });
+  }
+  // BEDAZZLED: gems all over the body and tentacles
+  const gemColors = [0x59d4ff, 0xff6bd6, 0x7dff8a, 0xffd93d, 0xff6b6b, 0xb197fc];
+  const gemMats = gemColors.map(c => new THREE.MeshStandardMaterial({ color: c, emissive: c, emissiveIntensity: 0.5, roughness: 0.15, metalness: 0.3 }));
+  for (let i = 0; i < 40; i++) {
+    const jewel = new THREE.Mesh(new THREE.OctahedronGeometry(rand(0.1, 0.2)), gemMats[i % gemMats.length]);
+    // scatter over the head sphere
+    const u = rand(0, Math.PI * 2), v = rand(-0.3, 1);
+    const r = 1.5;
+    jewel.position.set(Math.cos(u) * r * Math.sqrt(1 - v * v), 1.3 + v * r * 1.15, Math.sin(u) * r * Math.sqrt(1 - v * v) * 0.95);
+    g.add(jewel);
+  }
+  const halo = new THREE.PointLight(0xfff0a0, 25, 20);
+  halo.position.y = 1.5;
+  g.add(halo);
+  g.visible = false;
+  scene.add(g);
+  bedazzled.group = g;
+  bedazzled.tentacles = bTentacles;
+}
+function placeBedazzledNear(cx, cz) {
+  const a = rand(0, Math.PI * 2), d = rand(55, 80);
+  const x = cx + Math.cos(a) * d, z = cz + Math.sin(a) * d;
+  bedazzled.group.position.set(x, floorY(x, z) + 3, z);
+  bedazzled.group.visible = true;
+  bedazzled.found = false;
+}
+
 // compass sparkles: a trail of glowing dots leading toward the next goal
 const compassDots = [];
 {
@@ -804,12 +876,12 @@ function makeShark() {
     tooth.rotation.x = Math.PI;
     g.add(tooth);
   }
-  // sleepy "Zzz" label used during naps
-  const zzz = makeTextSprite('💤');
-  zzz.position.set(0, 2.4, 0);
-  zzz.visible = false;
-  g.add(zzz);
-  g.userData.zzz = zzz;
+  // scared "😱" label shown while a dragon is chasing the shark away
+  const scared = makeTextSprite('😱');
+  scared.position.set(0, 2.4, 0);
+  scared.visible = false;
+  g.add(scared);
+  g.userData.scared = scared;
   g.userData.tail = tail;
   return g;
 }
@@ -855,13 +927,93 @@ const sharks = [];
   });
 });
 
-// levels: more sharks, faster sharks, shorter naps
+// levels: more sharks, faster sharks
 function levelCfg(l) {
   return {
     sharkCount: Math.min(2 + l, 6),
     speedMult: 1 + (l - 1) * 0.12,
-    napDur: Math.max(3, 5 - (l - 1) * 0.5),
   };
+}
+const SCARE_DURATION = 10; // 2nd gem: the dragon scares the sharks away for 10 seconds
+
+// ----------------------------- the friendly dragon -----------------------------
+// summoned by the 2nd gem; it swoops in and frightens every shark away
+function makeDragon() {
+  const g = new THREE.Group();
+  const green = 0x4fc76a, belly = 0xd6f5b0;
+  const body = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 16), mat(green));
+  body.scale.set(2.4, 1.2, 1.1);
+  g.add(body);
+  const tummy = new THREE.Mesh(new THREE.SphereGeometry(0.97, 20, 16), mat(belly));
+  tummy.scale.set(2.2, 1.0, 0.95);
+  tummy.position.y = -0.3;
+  g.add(tummy);
+  // long curvy neck + head reaching forward
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.7, 1.6, 12), mat(green));
+  neck.rotation.z = -Math.PI / 2.6;
+  neck.position.set(2.0, 0.6, 0);
+  g.add(neck);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.75, 16, 14), mat(green));
+  head.position.set(2.9, 1.15, 0);
+  g.add(head);
+  const snout = new THREE.Mesh(new THREE.SphereGeometry(0.5, 14, 12), mat(green));
+  snout.scale.set(1.3, 0.8, 0.9);
+  snout.position.set(3.5, 1.0, 0);
+  g.add(snout);
+  for (const side of [-1, 1]) {
+    addKawaiiEye(g, 3.15, 1.45, side * 0.42, 0.24);
+    // little horns
+    const horn = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.5, 8), mat(0xfff1c1));
+    horn.position.set(2.7, 1.85, side * 0.3);
+    horn.rotation.z = side * 0.2;
+    g.add(horn);
+    // wings
+    const wing = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 10), mat(0x8be0a0, { roughness: 0.7 }));
+    wing.scale.set(1.4, 0.15, 2.0);
+    wing.position.set(-0.3, 0.9, side * 1.6);
+    wing.rotation.x = side * 0.5;
+    g.add(wing);
+    g.userData[`wing${side < 0 ? 'L' : 'R'}`] = wing;
+  }
+  // fiery breath puff (shown while roaring)
+  const fire = new THREE.Mesh(
+    new THREE.ConeGeometry(0.5, 1.6, 12),
+    new THREE.MeshBasicMaterial({ color: 0xff9636, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false })
+  );
+  fire.rotation.z = -Math.PI / 2;
+  fire.position.set(4.6, 0.95, 0);
+  g.add(fire);
+  g.userData.fire = fire;
+  // spiky back ridge
+  for (let i = -2; i <= 2; i++) {
+    const spike = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.5, 6), mat(0xfff1c1));
+    spike.position.set(i * 0.6 - 0.2, 1.15, 0);
+    g.add(spike);
+  }
+  const tail = makeTailFin(green, 1.2);
+  tail.position.x = -2.4;
+  tail.rotation.z = Math.PI / 2; // vertical dragon tail-fin
+  g.add(tail);
+  g.scale.setScalar(1.5);
+  g.visible = false;
+  scene.add(g);
+  return g;
+}
+const dragon = makeDragon();
+
+// 2nd gem: the dragon swoops in and frightens every shark
+function summonDragon() {
+  state.scareTimer = SCARE_DURATION;
+  const dir = new THREE.Vector3(Math.cos(player.rotation.y), 0, -Math.sin(player.rotation.y));
+  dragon.position.copy(player.position).addScaledVector(dir, 10).add(new THREE.Vector3(0, 6, 0));
+  dragon.visible = true;
+  sharks.forEach(s => {
+    if (s.active) {
+      s.state = 'scared';
+      s.mesh.userData.scared.visible = true;
+    }
+  });
+  sfx.dragon();
 }
 
 function pickPatrolTarget(shark) {
@@ -1235,7 +1387,7 @@ const state = {
   fishName: 'Little Fish',
   gemsCollected: 0,
   speedBoost: false,     // 1st gem
-  napTimer: 0,           // 2nd gem: sharks nap
+  scareTimer: 0,         // 2nd gem: a dragon scares the sharks away
   sparkles: false,       // 3rd gem
   invulnerable: 0,
   gameOver: false,
@@ -1243,11 +1395,14 @@ const state = {
   rollTimer: 0,          // happy barrel roll after a gem
   chestPhase: null,      // null | 'placed' | 'opening' | 'crown'
   chestTimer: 0,
+  finale: false,         // grand finale: hunt the bedazzled octopus
 };
 
 function updateHud() {
   hudLives.textContent = '❤️'.repeat(state.lives) + '🖤'.repeat(4 - state.lives);
-  hudLevel.textContent = `⭐ Level ${state.level} · ${state.score}`;
+  hudLevel.textContent = state.finale
+    ? `🐙 FINAL! · ${state.score}`
+    : `⭐ Level ${state.level} · ${state.score}`;
   gemSlots.forEach((slot, i) => slot.classList.toggle('got', i < state.gemsCollected));
 }
 
@@ -1380,13 +1535,17 @@ function resetGame(level = 1, keepScore = false) {
   if (!keepScore) state.score = 0; // a new run starts fresh; level-ups keep the streak
   state.gemsCollected = 0;
   state.speedBoost = false;
-  state.napTimer = 0;
+  state.scareTimer = 0;
+  dragon.visible = false;
   state.sparkles = false;
   state.invulnerable = 0;
   state.gameOver = false;
   state.shake = 0;
   state.rollTimer = 0;
   state.chestPhase = null;
+  state.finale = false;
+  bedazzled.group.visible = false;
+  bedazzled.found = false;
   chest.visible = false;
   chest.userData.glow.intensity = 0;
   chestLid.rotation.x = 0;
@@ -1405,7 +1564,7 @@ function resetGame(level = 1, keepScore = false) {
     s.mesh.rotation.x = 0;
     relocateShark(s, player.position.x, player.position.z);
     s.mesh.position.copy(s.home);
-    s.mesh.userData.zzz.visible = false;
+    s.mesh.userData.scared.visible = false;
   });
   updateHud();
   messageEl.classList.remove('show');
@@ -1481,11 +1640,8 @@ function collectGem(gem) {
     state.speedBoost = true;
     showPowerup('💎 First gem! ⚡ You can swim SUPER FAST now!');
   } else if (state.gemsCollected === 2) {
-    const nap = levelCfg(state.level).napDur;
-    state.napTimer = nap;
-    sharks.forEach(s => { if (s.active) { s.state = 'nap'; s.mesh.userData.zzz.visible = true; } });
-    sfx.nap();
-    showPowerup(`💎 Second gem! 😴 The sharks fell asleep — ${Math.round(nap)} second head start!`);
+    summonDragon();
+    showPowerup(`💎 Second gem! 🐉 A dragon scared the sharks away — ${SCARE_DURATION} second head start!`);
   } else if (state.gemsCollected === 3) {
     state.sparkles = true;
     showPowerup('💎 Third gem! ✨ You leave a sparkle trail! One more to go!');
@@ -1523,12 +1679,47 @@ function levelUp() {
     if (s.active && !wasActive) relocateShark(s, player.position.x, player.position.z);
     if (s.state === 'chase') { s.state = 'patrol'; s.target = pickPatrolTarget(s); }
   });
-  spawnGemsForLevel(player.position.x, player.position.z);
+  if (state.level > FINAL_GEM_LEVEL) {
+    // grand finale: no more gems — hunt down the bedazzled octopus!
+    state.finale = true;
+    gems.forEach(g => { g.collected = true; g.mesh.visible = false; });
+    placeBedazzledNear(player.position.x, player.position.z);
+    updateHud();
+    showPowerup(
+      `🎉 FINAL CHALLENGE! 👑 +500 points!<br>` +
+      `Now find the 💎 BEDAZZLED OCTOPUS 🐙 — an octopus covered in gems! Follow the sparkles, ${state.fishName}!`,
+      8000
+    );
+  } else {
+    spawnGemsForLevel(player.position.x, player.position.z);
+    updateHud();
+    showPowerup(
+      `🎉 LEVEL ${state.level}! 👑 +500 points!<br>` +
+      `${cfg.sharkCount} sharks now, and 4 new gems just appeared — keep swimming, ${state.fishName}!`,
+      6000
+    );
+  }
+}
+
+// reaching the bedazzled octopus wins the whole adventure
+function findBedazzled() {
+  bedazzled.found = true;
+  bedazzled.group.visible = false;
+  state.finale = false;
+  state.score += 2000; // grand prize!
+  state.running = false;
+  state.gameOver = true;
   updateHud();
-  showPowerup(
-    `🎉 LEVEL ${state.level}! 👑 +500 points!<br>` +
-    `${cfg.sharkCount} sharks now, and 4 new gems just appeared — keep swimming, ${state.fishName}!`,
-    6000
+  submitScore();
+  sfx.win();
+  sparkleBurst(player.position, 0xffd93d);
+  showMessage(
+    '🐙✨ YOU DID IT! ✨🐙',
+    [`${state.fishName} found the BEDAZZLED OCTOPUS! 💎`,
+     `You beat all ${FINAL_GEM_LEVEL} levels AND the final challenge!`,
+     `Final score: <b>${state.score}</b> 👑`],
+    'Play Again! 🌊',
+    () => resetGame(1)
   );
 }
 
@@ -1759,6 +1950,21 @@ function animate() {
       if (!g.collected && player.position.distanceTo(g.mesh.position) < 2.6) collectGem(g);
     }
 
+    // ---------- bedazzled octopus (grand finale) ----------
+    if (state.finale && !bedazzled.found) {
+      const bg = bedazzled.group;
+      // wiggle, bob, and sparkle in place
+      bg.position.y = floorY(bg.position.x, bg.position.z) + 3 + Math.sin(t * 1.2) * 0.4;
+      bg.rotation.y += dt * 0.5;
+      for (const tn of bedazzled.tentacles) {
+        tn.mesh.rotation.z = Math.cos(tn.angle) * (0.5 + Math.sin(t * 3 + tn.angle) * 0.25);
+        tn.mesh.rotation.x = -Math.sin(tn.angle) * (0.5 + Math.sin(t * 3 + tn.angle + 1) * 0.25);
+      }
+      // keep it from disappearing over the horizon if the player wanders off
+      if (Math.hypot(bg.position.x - px, bg.position.z - pz) > 170) placeBedazzledNear(px, pz);
+      if (player.position.distanceTo(bg.position) < 3.5) findBedazzled();
+    }
+
     // ---------- treasure chest finale ----------
     if (state.chestPhase === 'placed') {
       // horizontal distance only — the chest should open even if you hover above it
@@ -1802,7 +2008,10 @@ function animate() {
     // ---------- compass sparkles: point to the next goal ----------
     {
       let goal = null, goalColor = 0xffffff;
-      if (state.chestPhase) {
+      if (state.finale && !bedazzled.found) {
+        goal = bedazzled.group.position.clone().add(new THREE.Vector3(0, 1.5, 0));
+        goalColor = 0xff6bd6;
+      } else if (state.chestPhase) {
         goal = chest.position.clone().add(new THREE.Vector3(0, 1.5, 0));
         goalColor = 0xffd43b;
       } else {
@@ -1831,14 +2040,25 @@ function animate() {
       }
     }
 
-    // ---------- sharks ----------
-    if (state.napTimer > 0) {
-      state.napTimer -= dt;
-      if (state.napTimer <= 0) {
+    // ---------- dragon scare (2nd gem) ----------
+    if (state.scareTimer > 0) {
+      state.scareTimer -= dt;
+      // the dragon circles protectively over the player, roaring
+      const a = t * 1.1;
+      dragon.position.x += ((player.position.x + Math.cos(a) * 12) - dragon.position.x) * Math.min(1, dt * 2);
+      dragon.position.z += ((player.position.z + Math.sin(a) * 12) - dragon.position.z) * Math.min(1, dt * 2);
+      dragon.position.y += ((player.position.y + 7) - dragon.position.y) * Math.min(1, dt * 2);
+      dragon.rotation.y = -a - Math.PI / 2;
+      const flap = Math.sin(t * 8) * 0.5;
+      if (dragon.userData.wingL) { dragon.userData.wingL.rotation.x = 0.5 + flap; dragon.userData.wingR.rotation.x = -0.5 - flap; }
+      dragon.userData.fire.scale.setScalar(0.8 + Math.sin(t * 20) * 0.3);
+      dragon.userData.fire.material.opacity = 0.6 + Math.sin(t * 25) * 0.25;
+      if (state.scareTimer <= 0) {
         sharks.forEach(s => {
-          if (s.state === 'nap') { s.state = 'patrol'; s.target = pickPatrolTarget(s); s.mesh.userData.zzz.visible = false; }
+          if (s.state === 'scared') { s.state = 'patrol'; relocateShark(s, player.position.x, player.position.z); s.mesh.userData.scared.visible = false; }
         });
-        showPowerup('😳 The sharks woke up!', 2000);
+        dragon.visible = false;
+        showPowerup('🐉 The dragon flew home… the sharks are back!', 2500);
       }
     }
 
@@ -1853,10 +2073,15 @@ function animate() {
         s.mesh.rotation.x = (1 - Math.max(s.spin, 0)) * Math.PI * 2;
       }
 
-      if (s.state === 'nap') {
-        // drift gently while snoozing
-        s.mesh.position.y += Math.sin(t * 1.5) * dt * 0.4;
-        s.mesh.userData.tail.rotation.y = Math.sin(t * 2) * 0.15;
+      if (s.state === 'scared') {
+        // bolt straight away from the player as fast as possible!
+        const flee = new THREE.Vector3().subVectors(s.mesh.position, player.position).setY(0);
+        if (flee.lengthSq() < 0.01) flee.set(1, 0, 0);
+        flee.normalize();
+        s.mesh.position.addScaledVector(flee, s.speed * 1.6 * dt);
+        s.mesh.position.y = clamp(s.mesh.position.y, floorY(s.mesh.position.x, s.mesh.position.z) + 2, CEILING_Y - 2);
+        s.mesh.rotation.y = Math.atan2(flee.x, flee.z) - Math.PI / 2;
+        s.mesh.userData.tail.rotation.y = Math.sin(t * 22) * 0.6; // frantic tail
         continue;
       }
 
@@ -1934,4 +2159,4 @@ updateHud();
 animate();
 
 // tiny hook for automated testing / debugging in the console
-window.__game = { state, player, sharks, gems, coralClusters, resetGame, chest, crown, playerParts, showLeaderboard, submitScore, localScores };
+window.__game = { state, player, sharks, gems, coralClusters, resetGame, chest, crown, playerParts, showLeaderboard, submitScore, localScores, dragon, bedazzled, FINAL_GEM_LEVEL };

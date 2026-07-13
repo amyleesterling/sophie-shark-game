@@ -22,12 +22,17 @@ You have **4 lives ❤️❤️❤️❤️**.
 | Gem | Power |
 |-----|-------|
 | 💎 1st gem | You get to swim **super fast** ⚡ |
-| 💎 2nd gem | The sharks fall asleep — you get a **head start** 😴 |
+| 💎 2nd gem | A **dragon** 🐉 swoops in and scares the sharks away for **10 seconds**! |
 | 💎 3rd gem | You leave a **sparkle trail** ✨ |
 | 💎 4th gem | A **treasure chest** appears — open it for the **royal crown** and LEVEL UP! 👑 |
 
 **Levels:** every crown levels you up on the spot — more sharks, faster
-sharks, shorter naps, and 4 new gems appear nearby. How far can you go?
+sharks, and 4 new gems appear nearby.
+
+**The grand finale:** after you beat **level 5**, the objective changes —
+now you must find the one and only **BEDAZZLED OCTOPUS** 🐙💎 (an octopus
+covered head-to-tentacle in sparkling gems!) somewhere in the ocean. Follow
+the sparkles, reach it, and you win the whole adventure! 🎉
 
 **Make it yours:** pick your fish's color and name on the start screen
 (the game remembers for next time).
