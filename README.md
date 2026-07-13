@@ -22,7 +22,7 @@ You have **4 lives ❤️❤️❤️❤️**.
 | Gem | Power |
 |-----|-------|
 | 💎 1st gem | You get to swim **super fast** ⚡ |
-| 💎 2nd gem | A **dragon** 🐉 swoops in and scares the sharks away for **10 seconds**! |
+| 💎 2nd gem | A **sea-dragon king** 🐉 swims across the screen and scares the sharks away for **10 seconds**! |
 | 💎 3rd gem | You leave a **sparkle trail** ✨ |
 | 💎 4th gem | A **treasure chest** appears — open it for the **royal crown** and LEVEL UP! 👑 |
 
