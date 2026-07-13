@@ -131,6 +131,8 @@ const sfx = {
   nap: () => { beep(500, 0.3, 'sine', 0.15, 250); },
   // dragon roar: a big low rumble that swoops upward
   dragon: () => { beep(90, 0.6, 'sawtooth', 0.28, 200); setTimeout(() => beep(140, 0.5, 'sawtooth', 0.22, 320), 120); setTimeout(() => beep(1100, 0.15, 'square', 0.12), 260); },
+  puff: () => { beep(300, 0.12, 'square', 0.2, 900); setTimeout(() => beep(1200, 0.2, 'sine', 0.18, 400), 90); }, // catch/throw a puffer
+  zap: () => { beep(1400, 0.08, 'square', 0.22, 200); setTimeout(() => beep(180, 0.5, 'sawtooth', 0.22, 90), 60); }, // stingray sting
 };
 
 // ----------------------------- ocean floor & water -----------------------------
@@ -882,6 +884,12 @@ function makeShark() {
   scared.visible = false;
   g.add(scared);
   g.userData.scared = scared;
+  // dizzy "💫" label shown while stunned by a thrown puffer
+  const dizzy = makeTextSprite('💫');
+  dizzy.position.set(0, 2.4, 0);
+  dizzy.visible = false;
+  g.add(dizzy);
+  g.userData.dizzy = dizzy;
   g.userData.tail = tail;
   return g;
 }
@@ -919,11 +927,12 @@ const sharks = [];
     home: new THREE.Vector3(home[0], 5, home[1]),
     range,
     target: new THREE.Vector3(home[0], 5, home[1]),
-    state: 'patrol',           // patrol | chase | nap
+    state: 'patrol',           // patrol | chase | nap | scared
     speed: rand(6.5, 7.5),
     newTargetTimer: 0,
     active: true,
     spin: 0,                   // celebratory barrel roll after a chomp
+    stunTimer: 0,              // dizzy from a thrown puffer — can't chase
   });
 });
 
@@ -1431,6 +1440,146 @@ for (const spot of anemoneSpots.slice(0, 4)) {
   });
 }
 
+// ----------------------------- puffer fish (catch & stash) -----------------------------
+// Shy puffers drift by and swim away from you; catch one to stash it, then
+// throw it to stun a shark. Stored in the HUD under your hearts.
+const MAX_STASH = 5;
+function makePuffer() {
+  const g = new THREE.Group();
+  const bodyMat = mat(0xffd97a);
+  const ball = new THREE.Mesh(new THREE.SphereGeometry(0.75, 16, 14), bodyMat);
+  g.add(ball);
+  const belly = new THREE.Mesh(new THREE.SphereGeometry(0.7, 14, 12), mat(0xfff2cf));
+  belly.scale.set(1, 0.8, 0.9);
+  belly.position.set(0.15, -0.15, 0);
+  g.add(belly);
+  // spikes all over
+  const spikes = [];
+  for (let i = 0; i < 26; i++) {
+    const a = Math.acos(1 - 2 * (i + 0.5) / 26), b = Math.PI * (1 + Math.sqrt(5)) * i;
+    const dir = new THREE.Vector3(Math.sin(a) * Math.cos(b), Math.cos(a), Math.sin(a) * Math.sin(b));
+    const spike = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.32, 5), mat(0xf0a93a));
+    spike.position.copy(dir).multiplyScalar(0.75);
+    spike.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+    g.add(spike);
+    spikes.push(spike);
+  }
+  g.userData.spikes = spikes;
+  for (const side of [-1, 1]) addKawaiiEye(g, 0.5, 0.28, side * 0.32, 0.18);
+  addBlush(g, 0.6, -0.05, 0.42, 0.1);
+  const mouth = new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.035, 6, 10, Math.PI), mat(0x7a3b2a));
+  mouth.position.set(0.74, -0.1, 0);
+  mouth.rotation.y = Math.PI / 2;
+  mouth.rotation.z = Math.PI;
+  g.add(mouth);
+  for (const side of [-1, 1]) {
+    const fin = makeSideFin(0xf0a93a, 0.45);
+    fin.position.set(0.1, -0.1, side * 0.7);
+    fin.rotation.x = -side * 1.2;
+    g.add(fin);
+  }
+  g.scale.setScalar(0.9);
+  g.visible = false;
+  scene.add(g);
+  return g;
+}
+const puffers = [];
+for (let i = 0; i < 3; i++) puffers.push({ mesh: makePuffer(), active: false, phase: rand(0, 6.28) });
+
+function spawnPuffer(px, pz) {
+  const p = puffers.find(p => !p.active);
+  if (!p) return;
+  const a = rand(0, Math.PI * 2), d = rand(26, 40);
+  const x = px + Math.cos(a) * d, z = pz + Math.sin(a) * d;
+  p.mesh.position.set(x, clamp(floorY(x, z) + rand(3, 8), 2, CEILING_Y - 2), z);
+  p.mesh.visible = true;
+  p.active = true;
+}
+
+// thrown-puffer projectiles that fly to a shark and stun it
+const puffThrows = []; // { mesh, target, t }
+function throwPuffer() {
+  if (!state.running || state.puffers <= 0) { pulseStash(); return; }
+  // nearest active, un-stunned shark
+  let best = null, bestD = Infinity;
+  for (const s of sharks) {
+    if (!s.active || s.stunTimer > 0 || s.state === 'nap' || s.state === 'scared') continue;
+    const d = player.position.distanceTo(s.mesh.position);
+    if (d < bestD) { bestD = d; best = s; }
+  }
+  if (!best) { showPowerup('🐡 No shark to stun right now!', 1500); return; }
+  state.puffers--;
+  updateHud();
+  const m = puffers.find(p => !p.active)?.mesh;
+  const proj = m || makePuffer();
+  proj.visible = true;
+  proj.position.copy(player.position);
+  proj.scale.setScalar(0.5);
+  puffThrows.push({ mesh: proj, target: best, t: 0 });
+  sfx.puff();
+}
+
+// ----------------------------- stingrays (dodge them!) -----------------------------
+// Glide past in a straight line; if one touches you, you're stunned and
+// can't swim for 3 seconds.
+function makeStingray() {
+  const g = new THREE.Group();
+  const bodyMat = mat(0x9a6bc9, { roughness: 0.7 });
+  // flat diamond body
+  const disc = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 12), bodyMat);
+  disc.scale.set(1.7, 0.28, 1.9);
+  g.add(disc);
+  const belly = new THREE.Mesh(new THREE.SphereGeometry(0.96, 18, 10), mat(0xe7d4f7));
+  belly.scale.set(1.6, 0.22, 1.8);
+  belly.position.y = -0.12;
+  g.add(belly);
+  // flapping wings (side lobes)
+  const wings = [];
+  for (const side of [-1, 1]) {
+    const wing = new THREE.Mesh(new THREE.SphereGeometry(1, 14, 8), bodyMat);
+    wing.scale.set(1.5, 0.14, 1.4);
+    wing.position.set(0, 0, side * 1.4);
+    g.add(wing);
+    wings.push({ mesh: wing, side });
+    addKawaiiEye(g, 1.05, 0.22, side * 0.32, 0.16);
+  }
+  g.userData.wings = wings;
+  // long whippy tail with a stinger
+  for (let i = 0; i < 5; i++) {
+    const seg = new THREE.Mesh(new THREE.CylinderGeometry(0.12 - i * 0.02, 0.14 - i * 0.02, 0.7, 6), bodyMat);
+    seg.rotation.z = Math.PI / 2;
+    seg.position.set(-1.4 - i * 0.6, 0, 0);
+    g.add(seg);
+  }
+  const stinger = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.5, 6), mat(0xffe066));
+  stinger.rotation.z = Math.PI / 2;
+  stinger.position.set(-4.5, 0, 0);
+  g.add(stinger);
+  g.scale.setScalar(1.15);
+  g.visible = false;
+  scene.add(g);
+  return g;
+}
+const stingrays = [];
+for (let i = 0; i < 2; i++) stingrays.push({ mesh: makeStingray(), active: false, vel: new THREE.Vector3(), phase: rand(0, 6.28) });
+
+function spawnStingray(px, pz) {
+  const r = stingrays.find(r => !r.active);
+  if (!r) return;
+  // enter from a random edge and glide across the player's neighbourhood
+  const a = rand(0, Math.PI * 2);
+  const inDir = new THREE.Vector3(Math.cos(a), 0, Math.sin(a));
+  const start = new THREE.Vector3(px, 0, pz).addScaledVector(inDir, 55);
+  start.y = clamp(floorY(start.x, start.z) + rand(3, 8), 2.5, CEILING_Y - 2);
+  // aim roughly toward the player's area (with a little miss so it "swims by")
+  const aim = new THREE.Vector3(px + rand(-14, 14), start.y, pz + rand(-14, 14));
+  r.vel.subVectors(aim, start).setY(0).normalize().multiplyScalar(rand(7, 9));
+  r.mesh.position.copy(start);
+  r.mesh.rotation.y = Math.atan2(r.vel.x, r.vel.z) - Math.PI / 2;
+  r.mesh.visible = true;
+  r.active = true;
+}
+
 // ----------------------------- HUD & game state -----------------------------
 const hudLives = document.getElementById('lives');
 const hudGems = document.getElementById('gems');
@@ -1462,7 +1611,22 @@ const state = {
   chestPhase: null,      // null | 'placed' | 'opening' | 'crown'
   chestTimer: 0,
   finale: false,         // grand finale: hunt the bedazzled octopus
+  puffers: 0,            // stashed puffer fish (throw to stun a shark)
+  stungTimer: 0,         // stung by a stingray — can't swim
+  pufferSpawnTimer: 8,   // countdown to the next wild puffer
+  raySpawnTimer: 14,     // countdown to the next stingray
 };
+
+const stashEl = document.getElementById('stash');
+const stashCountEl = document.getElementById('stash-count');
+const dizzyEl = document.getElementById('dizzy');
+const dizzyStarsEl = document.getElementById('dizzy-stars');
+let stashPulseTimer = null;
+function pulseStash() {
+  stashEl.classList.add('pulse');
+  clearTimeout(stashPulseTimer);
+  stashPulseTimer = setTimeout(() => stashEl.classList.remove('pulse'), 500);
+}
 
 function updateHud() {
   hudLives.textContent = '❤️'.repeat(state.lives) + '🖤'.repeat(4 - state.lives);
@@ -1470,6 +1634,9 @@ function updateHud() {
     ? `🐙 FINAL! · ${state.score}`
     : `⭐ Level ${state.level} · ${state.score}`;
   gemSlots.forEach((slot, i) => slot.classList.toggle('got', i < state.gemsCollected));
+  stashEl.classList.toggle('show', state.running);
+  stashEl.classList.toggle('empty', state.puffers <= 0);
+  stashCountEl.textContent = state.puffers;
 }
 
 // ----------------------------- leaderboard -----------------------------
@@ -1613,6 +1780,15 @@ function resetGame(level = 1, keepScore = false) {
   state.rollTimer = 0;
   state.chestPhase = null;
   state.finale = false;
+  state.puffers = 0;
+  state.stungTimer = 0;
+  state.pufferSpawnTimer = 8;
+  state.raySpawnTimer = 14;
+  dizzyEl.classList.remove('show');
+  dizzyStarsEl.classList.remove('show');
+  puffers.forEach(p => { p.active = false; p.mesh.visible = false; });
+  stingrays.forEach(r => { r.active = false; r.mesh.visible = false; });
+  puffThrows.length = 0;
   bedazzled.group.visible = false;
   bedazzled.found = false;
   chest.visible = false;
@@ -1630,10 +1806,12 @@ function resetGame(level = 1, keepScore = false) {
     s.mesh.visible = s.active;
     s.state = 'patrol';
     s.spin = 0;
+    s.stunTimer = 0;
     s.mesh.rotation.x = 0;
     relocateShark(s, player.position.x, player.position.z);
     s.mesh.position.copy(s.home);
     s.mesh.userData.scared.visible = false;
+    s.mesh.userData.dizzy.visible = false;
   });
   updateHud();
   messageEl.classList.remove('show');
@@ -1650,10 +1828,15 @@ startBtn.addEventListener('click', () => {
 const keys = {};
 window.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') return; // let the name box have its letters
+  if (e.code === 'KeyE' && !e.repeat) throwPuffer(); // throw a stashed puffer
   keys[e.code] = true;
   if ([ 'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight' ].includes(e.code)) e.preventDefault();
 });
 window.addEventListener('keyup', e => { keys[e.code] = false; });
+
+// tap the HUD stash to throw a puffer (works on desktop and touch)
+stashEl.addEventListener('click', throwPuffer);
+stashEl.addEventListener('touchstart', e => { e.preventDefault(); throwPuffer(); }, { passive: false });
 
 // touch joystick
 const joy = { active: false, dx: 0, dy: 0, up: false, down: false };
@@ -1951,20 +2134,27 @@ function animate() {
     const turnSpeed = 2.6;
 
     let forward = 0, turn = 0, vertical = 0;
-    if (keys['KeyW'] || keys['ArrowUp']) forward += 1;
-    if (keys['KeyS'] || keys['ArrowDown']) forward -= 0.6;
-    if (keys['KeyA'] || keys['ArrowLeft']) turn += 1;
-    if (keys['KeyD'] || keys['ArrowRight']) turn -= 1;
-    if (keys['Space']) vertical += 1;
-    if (keys['ShiftLeft'] || keys['ShiftRight']) vertical -= 1;
-    if (joy.active) {
-      forward += clamp(-joy.dy, -0.6, 1);
-      turn -= joy.dx;
+    // a stingray sting leaves you dizzy — you can't swim for 3 seconds
+    const stung = state.stungTimer > 0;
+    if (stung) {
+      state.stungTimer -= dt;
+      if (state.stungTimer <= 0) { dizzyEl.classList.remove('show'); dizzyStarsEl.classList.remove('show'); }
+    } else {
+      if (keys['KeyW'] || keys['ArrowUp']) forward += 1;
+      if (keys['KeyS'] || keys['ArrowDown']) forward -= 0.6;
+      if (keys['KeyA'] || keys['ArrowLeft']) turn += 1;
+      if (keys['KeyD'] || keys['ArrowRight']) turn -= 1;
+      if (keys['Space']) vertical += 1;
+      if (keys['ShiftLeft'] || keys['ShiftRight']) vertical -= 1;
+      if (joy.active) {
+        forward += clamp(-joy.dy, -0.6, 1);
+        turn -= joy.dx;
+      }
+      if (joy.up) vertical += 1;
+      if (joy.down) vertical -= 1;
     }
-    if (joy.up) vertical += 1;
-    if (joy.down) vertical -= 1;
 
-    player.rotation.y += turn * turnSpeed * dt;
+    player.rotation.y += (stung ? 3.5 : turn * turnSpeed) * dt; // spin helplessly while stung
     const dir = new THREE.Vector3(Math.cos(player.rotation.y), 0, -Math.sin(player.rotation.y));
     player.position.addScaledVector(dir, forward * baseSpeed * dt); // no walls — the ocean is endless
     const seabed = floorY(player.position.x, player.position.z) + 1.0;
@@ -2017,6 +2207,84 @@ function animate() {
     // ---------- gems ----------
     for (const g of gems) {
       if (!g.collected && player.position.distanceTo(g.mesh.position) < 2.6) collectGem(g);
+    }
+
+    // ---------- puffer fish: spawn, flee, catch ----------
+    state.pufferSpawnTimer -= dt;
+    if (state.pufferSpawnTimer <= 0) {
+      state.pufferSpawnTimer = rand(9, 16);
+      if (state.puffers < MAX_STASH) spawnPuffer(px, pz);
+    }
+    for (const p of puffers) {
+      if (!p.active) continue;
+      const m = p.mesh;
+      const away = new THREE.Vector3().subVectors(m.position, player.position);
+      const d = away.length();
+      // caught it!
+      if (d < 2.8 && state.puffers < MAX_STASH) {
+        p.active = false; m.visible = false;
+        state.puffers++;
+        updateHud();
+        pulseStash();
+        sfx.puff();
+        sparkleBurst(m.position, 0xffd97a);
+        showPowerup('🐡 Caught a puffer! Tap 🐡 to stun a shark', 1800);
+        continue;
+      }
+      // shy: drift away when you get near, otherwise wander gently
+      away.y = 0;
+      if (d < 16 && d > 0.1) away.normalize(); else away.set(Math.cos(t * 0.3 + p.phase), 0, Math.sin(t * 0.3 + p.phase));
+      const spd = d < 16 ? 6.5 : 2.2;
+      m.position.addScaledVector(away, spd * dt);
+      m.position.y = clamp(m.position.y + Math.sin(t * 1.5 + p.phase) * dt * 0.5, floorY(m.position.x, m.position.z) + 1.5, CEILING_Y - 1);
+      m.rotation.y = Math.atan2(away.x, away.z) - Math.PI / 2;
+      m.userData.spikes.forEach(sp => sp.scale.setScalar(1 + Math.sin(t * 4 + p.phase) * 0.12)); // breathe
+      // gone too far — recycle
+      if (Math.hypot(m.position.x - px, m.position.z - pz) > 95) { p.active = false; m.visible = false; }
+    }
+
+    // ---------- thrown puffers: fly to the shark and stun it ----------
+    for (let i = puffThrows.length - 1; i >= 0; i--) {
+      const th = puffThrows[i];
+      th.t += dt * 2.2;
+      const from = player.position, to = th.target.mesh.position;
+      th.mesh.position.lerpVectors(from, to, Math.min(th.t, 1));
+      th.mesh.position.y += Math.sin(Math.min(th.t, 1) * Math.PI) * 2; // little arc
+      th.mesh.rotation.x += dt * 12;
+      th.mesh.scale.setScalar(0.5 + Math.min(th.t, 1) * 0.5);
+      if (th.t >= 1) {
+        th.target.stunTimer = 4;
+        th.target.state = 'patrol';
+        th.target.mesh.userData.dizzy.visible = true;
+        sparkleBurst(to, 0xffd97a);
+        th.mesh.visible = false;
+        puffThrows.splice(i, 1);
+        showPowerup('🐡💫 Direct hit! The shark is dizzy!', 1800);
+      }
+    }
+
+    // ---------- stingrays: glide by; sting leaves you dizzy ----------
+    state.raySpawnTimer -= dt;
+    if (state.raySpawnTimer <= 0) {
+      state.raySpawnTimer = rand(12, 22);
+      spawnStingray(px, pz);
+    }
+    for (const r of stingrays) {
+      if (!r.active) continue;
+      const m = r.mesh;
+      m.position.addScaledVector(r.vel, dt);
+      m.position.y = clamp(m.position.y, floorY(m.position.x, m.position.z) + 2, CEILING_Y - 1) + Math.sin(t * 1.5 + r.phase) * dt * 0.4;
+      for (const w of m.userData.wings) w.mesh.rotation.x = Math.sin(t * 3 + r.phase) * 0.5 * w.side; // flap
+      // sting on contact (not while invulnerable or already dizzy)
+      if (!stung && state.invulnerable <= 0 && player.position.distanceTo(m.position) < 2.8) {
+        state.stungTimer = 3;
+        dizzyEl.classList.add('show');
+        dizzyStarsEl.classList.add('show');
+        state.shake = Math.max(state.shake, 0.4);
+        sfx.zap();
+        showPowerup('⚡ Zapped by a stingray! You\'re too dizzy to swim!', 2200);
+      }
+      if (Math.hypot(m.position.x - px, m.position.z - pz) > 90) { r.active = false; m.visible = false; }
     }
 
     // ---------- bedazzled octopus (grand finale) ----------
@@ -2165,6 +2433,16 @@ function animate() {
         s.mesh.rotation.x = (1 - Math.max(s.spin, 0)) * Math.PI * 2;
       }
 
+      // dizzy from a thrown puffer — drifts in place, can't chase
+      if (s.stunTimer > 0) {
+        s.stunTimer -= dt;
+        s.mesh.rotation.y += dt * 3.5;          // spin woozily
+        s.mesh.position.y += Math.sin(t * 4) * dt * 0.5;
+        s.mesh.userData.tail.rotation.y = Math.sin(t * 3) * 0.2;
+        if (s.stunTimer <= 0) { s.mesh.userData.dizzy.visible = false; s.state = 'patrol'; s.target = pickPatrolTarget(s); }
+        continue;
+      }
+
       if (s.state === 'scared') {
         // bolt straight away from the player as fast as possible!
         const flee = new THREE.Vector3().subVectors(s.mesh.position, player.position).setY(0);
@@ -2251,4 +2529,4 @@ updateHud();
 animate();
 
 // tiny hook for automated testing / debugging in the console
-window.__game = { state, player, sharks, gems, coralClusters, resetGame, chest, crown, playerParts, showLeaderboard, submitScore, localScores, dragon, bedazzled, FINAL_GEM_LEVEL };
+window.__game = { state, player, sharks, gems, coralClusters, resetGame, chest, crown, playerParts, showLeaderboard, submitScore, localScores, dragon, bedazzled, FINAL_GEM_LEVEL, puffers, stingrays, throwPuffer, spawnPuffer, spawnStingray, puffThrows };

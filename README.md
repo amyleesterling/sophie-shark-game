@@ -34,13 +34,22 @@ now you must find the one and only **BEDAZZLED OCTOPUS** 🐙💎 (an octopus
 covered head-to-tentacle in sparkling gems!) somewhere in the ocean. Follow
 the sparkles, reach it, and you win the whole adventure! 🎉
 
+**🐡 Puffer fish:** shy puffers drift by and swim away from you. Catch one by
+swimming right up to it and it goes into your **stash** (under your hearts).
+When a shark gets too close, **tap the 🐡 stash (or press `E`)** to throw a
+puffer and **stun the shark** — it gets dizzy 💫 for a few seconds!
+
+**⚡ Stingrays:** every so often a stingray glides past. **Dodge it!** If it
+stings you, you get dizzy and **can't swim for 3 seconds** 😵.
+
 **Make it yours:** pick your fish's color and name on the start screen
 (the game remembers for next time).
 
 The ocean is full of friendly creatures too: octopuses 🐙, jellyfish, sea
 turtles 🐢, a giant gentle whale 🐋, seahorses, scuttling crabs 🦀,
 clownfish living in the anemones, starfish, and a little school of fish
-just swimming around.
+just swimming around — plus shy puffer fish 🐡 to catch and stingrays ⚡ to
+dodge.
 
 ## Controls
 
@@ -50,8 +59,10 @@ just swimming around.
 | Turn left / right | `A` / `D` or `←` / `→` |
 | Swim up | `Space` |
 | Swim down | `Shift` |
+| Throw a puffer (stun a shark) | `E` |
 
-On a phone or tablet, use the on-screen joystick and the ⬆️ / ⬇️ buttons.
+On a phone or tablet, use the on-screen joystick and the ⬆️ / ⬇️ buttons, and
+tap the 🐡 stash to throw a puffer.
 
 ## 🏆 High-score leaderboard
 

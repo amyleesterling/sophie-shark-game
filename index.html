@@ -36,6 +36,16 @@
   }
   #gems .gem-slot { opacity: 0.25; margin: 0 2px; transition: opacity 0.3s, transform 0.3s; display: inline-block; }
   #gems .gem-slot.got { opacity: 1; transform: scale(1.25); }
+  #hud-left { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+  #stash {
+    pointer-events: auto; cursor: pointer; user-select: none;
+    display: none; transition: transform 0.12s, opacity 0.3s;
+  }
+  #stash.show { display: block; }
+  #stash.empty { opacity: 0.45; }
+  #stash:active { transform: scale(0.9); }
+  #stash.pulse { animation: stashPulse 0.5s ease; }
+  @keyframes stashPulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.35); } }
   #powerup {
     position: fixed; top: 70px; left: 50%; transform: translateX(-50%);
     color: #ffe95c; font-size: 24px; text-align: center;
@@ -124,6 +134,21 @@
     box-shadow: inset 0 0 90px 12px rgba(255, 60, 60, 0.55);
     transition: opacity 0.3s;
   }
+  /* ---------- Stung / dizzy overlay ---------- */
+  #dizzy {
+    position: fixed; inset: 0; pointer-events: none; z-index: 6; opacity: 0;
+    box-shadow: inset 0 0 120px 30px rgba(180, 80, 255, 0.55);
+    transition: opacity 0.25s;
+  }
+  #dizzy.show { opacity: 1; }
+  #dizzy-stars {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    font-size: 46px; z-index: 11; pointer-events: none; opacity: 0;
+    transition: opacity 0.25s; text-shadow: 0 2px 8px rgba(0,0,0,0.5);
+  }
+  #dizzy-stars.show { opacity: 1; animation: spin 1.1s linear infinite; }
+  @keyframes spin { to { transform: translate(-50%, -50%) rotate(360deg); } }
+
   /* ---------- Hidden indicator ---------- */
   #hidden-badge {
     position: fixed; bottom: 110px; left: 50%; transform: translateX(-50%);
@@ -176,7 +201,10 @@
 <canvas id="game"></canvas>
 
 <div id="hud">
-  <div class="hud-box" id="lives">❤️❤️❤️❤️</div>
+  <div id="hud-left">
+    <div class="hud-box" id="lives">❤️❤️❤️❤️</div>
+    <div class="hud-box" id="stash" title="Tap to throw a puffer fish and stun a shark!">🐡 <span id="stash-count">0</span></div>
+  </div>
   <div class="hud-box" id="level">⭐ Level 1</div>
   <div class="hud-box" id="gems">
     <span class="gem-slot">💎</span><span class="gem-slot">💎</span><span class="gem-slot">💎</span><span class="gem-slot">💎</span>
@@ -184,6 +212,8 @@
 </div>
 <div id="powerup"></div>
 <div id="danger"></div>
+<div id="dizzy"></div>
+<div id="dizzy-stars">💫😵💫</div>
 <div id="hidden-badge">🪸 Hiding! The sharks can't see you</div>
 
 <div id="message" class="show">
@@ -191,6 +221,7 @@
   <p>You are a little fish in an <b>endless ocean</b>! Collect <b>4 gems 💎</b> to level up — forever!</p>
   <p>Watch out for the sharks — hide behind the coral 🪸 so they can't see you!</p>
   <p>💎 1st gem: you swim FAST! &nbsp; 💎 2nd gem: sharks take a nap!</p>
+  <p>🐡 Catch puffer fish and tap your stash to stun a shark! &nbsp; ⚡ Dodge the stingrays!</p>
   <p>You have 4 lives ❤️❤️❤️❤️</p>
   <div id="picker">
     <div id="swatches"></div>
@@ -214,7 +245,7 @@
   <button id="btn-up">⬆️</button>
   <button id="btn-down">⬇️</button>
 </div>
-<div id="help">Swim: WASD / arrow keys &nbsp;•&nbsp; Up: Space &nbsp;•&nbsp; Down: Shift</div>
+<div id="help">Swim: WASD / arrow keys &nbsp;•&nbsp; Up: Space &nbsp;•&nbsp; Down: Shift &nbsp;•&nbsp; Throw puffer: E</div>
 
 <script type="module" src="game.js"></script>
 </body>
