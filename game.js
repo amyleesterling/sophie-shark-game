@@ -946,33 +946,100 @@ function levelCfg(l) {
 const SCARE_DURATION = 10; // 2nd gem: the dragon scares the sharks away for 10 seconds
 
 // ----------------------------- the sea-dragon king -----------------------------
-// A serpentine East-Asian dragon (à la the North Sea Dragon King) — no wings,
-// a long undulating body, flowing whiskers, a golden mane and antlers.
+// Ao Shun-inspired North Sea Dragon King: a wingless Chinese long with a
+// serpentine scaled body, deer antlers, eagle claws, a flowing beard and pearl.
 // Summoned by the 2nd gem; it swoops across the screen and scares the sharks.
-const DRAGON_SEGMENTS = 16;
+const DRAGON_SEGMENTS = 19;
 function makeDragon() {
   const g = new THREE.Group();
-  const teal = 0x2ea6c9, belly = 0xdff6ff, gold = 0xffd23f, red = 0xe8433a;
-  const goldMat = mat(gold, { metalness: 0.5, roughness: 0.35 });
+  const midnight = 0x173b73;
+  const cobalt = 0x1d67a5;
+  const ice = 0x8edee6;
+  const pearl = 0xecfbff;
+  const gold = 0xf5c451;
+  const bodyMat = mat(midnight, { roughness: 0.48, metalness: 0.12 });
+  const scaleMat = mat(cobalt, { roughness: 0.36, metalness: 0.2 });
+  const iceMat = mat(ice, { roughness: 0.55, metalness: 0.08 });
+  const bellyMat = mat(pearl, { roughness: 0.58, metalness: 0.04 });
+  const goldMat = mat(gold, { metalness: 0.62, roughness: 0.25 });
+  const hornMat = mat(0xf3dfb4, { roughness: 0.62 });
 
-  // ---- long serpent body: a chain of segments the animation undulates ----
+  function curvedTube(points, radius, material, tubularSegments = 18) {
+    const curve = new THREE.CatmullRomCurve3(points.map(p => new THREE.Vector3(...p)));
+    return new THREE.Mesh(new THREE.TubeGeometry(curve, tubularSegments, radius, 6, false), material);
+  }
+
+  function makeAntler(side) {
+    const antler = new THREE.Group();
+    const beam = curvedTube([
+      [0, 0, 0], [-0.08, 0.42, side * 0.03], [-0.28, 0.82, side * 0.08], [-0.55, 1.1, side * 0.12],
+    ], 0.085, hornMat, 12);
+    antler.add(beam);
+    for (const [x, y, lean] of [[-0.1, 0.43, 0.33], [-0.28, 0.73, 0.42], [-0.47, 0.98, 0.32]]) {
+      const tine = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.5, 7), hornMat);
+      tine.position.set(x - lean * 0.2, y + 0.15, side * (0.05 + lean * 0.18));
+      tine.rotation.z = side * 0.5;
+      tine.rotation.x = side * -0.2;
+      antler.add(tine);
+    }
+    return antler;
+  }
+
+  function makeDragonLeg(side, front) {
+    const leg = new THREE.Group();
+    const upper = new THREE.Mesh(new THREE.CapsuleGeometry(0.16, 0.62, 4, 8), scaleMat);
+    upper.position.set(front ? 0.12 : -0.08, -0.36, side * 0.13);
+    upper.rotation.z = front ? -0.45 : 0.35;
+    upper.rotation.x = side * 0.22;
+    leg.add(upper);
+    const wrist = new THREE.Mesh(new THREE.CapsuleGeometry(0.13, 0.48, 4, 8), bodyMat);
+    wrist.position.set(front ? 0.38 : -0.27, -0.78, side * 0.2);
+    wrist.rotation.z = front ? -0.8 : 0.72;
+    wrist.rotation.x = side * 0.28;
+    leg.add(wrist);
+    const paw = new THREE.Mesh(new THREE.SphereGeometry(0.24, 10, 8), scaleMat);
+    paw.scale.set(1.35, 0.65, 1);
+    paw.position.set(front ? 0.58 : -0.48, -0.96, side * 0.24);
+    leg.add(paw);
+    for (let c = -1; c <= 1; c++) {
+      const claw = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.26, 6), hornMat);
+      claw.position.set(front ? 0.8 : -0.7, -0.98, side * (0.24 + c * 0.12));
+      claw.rotation.z = front ? -Math.PI / 2 : Math.PI / 2;
+      leg.add(claw);
+    }
+    leg.userData.side = side;
+    return leg;
+  }
+
+  // ---- long, overlapping serpent body: reads as one continuous scaled form ----
   const segments = [];
-  const spacing = 0.92;
+  const spacing = 0.6;
   for (let i = 0; i < DRAGON_SEGMENTS; i++) {
     const seg = new THREE.Group();
-    const taper = 1 - i / (DRAGON_SEGMENTS + 3); // thick near the head, thin at the tail
-    const r = 0.62 * taper + 0.12;
-    const scale = new THREE.Mesh(new THREE.SphereGeometry(r, 16, 12), mat(teal));
-    scale.scale.set(1, 1.05, 1);
-    seg.add(scale);
-    const bellyM = new THREE.Mesh(new THREE.SphereGeometry(r * 0.82, 14, 10), mat(belly));
-    bellyM.position.set(0.1, -r * 0.42, 0);
-    bellyM.scale.set(1, 0.7, 0.9);
-    seg.add(bellyM);
-    // little golden dorsal frill running down the spine
-    const frill = new THREE.Mesh(new THREE.ConeGeometry(0.1 + 0.12 * taper, 0.34 + 0.3 * taper, 5), goldMat);
-    frill.position.y = r + 0.05;
-    seg.add(frill);
+    const taper = 1 - i / (DRAGON_SEGMENTS + 2);
+    const r = 0.54 * taper + 0.18;
+    const body = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), bodyMat);
+    body.scale.set(r * 1.55, r, r);
+    seg.add(body);
+
+    const bellyBand = new THREE.Mesh(new THREE.SphereGeometry(1, 14, 10), bellyMat);
+    bellyBand.scale.set(r * 1.18, r * 0.48, r * 0.8);
+    bellyBand.position.y = -r * 0.62;
+    seg.add(bellyBand);
+
+    // Small hexagonal carp-scale plates catch the underwater light without
+    // breaking the body into a polka-dot or caterpillar silhouette.
+    for (const side of [-1, 1]) {
+      const plate = new THREE.Mesh(new THREE.CircleGeometry(r * 0.21, 6), i % 5 === 0 ? iceMat : scaleMat);
+      plate.position.set(i % 2 ? -r * 0.18 : r * 0.12, r * 0.1, side * r * 1.005);
+      plate.rotation.y = side < 0 ? Math.PI : 0;
+      seg.add(plate);
+    }
+
+    const spine = new THREE.Mesh(new THREE.ConeGeometry(r * 0.2, r * 0.68, 5), i % 3 === 0 ? goldMat : iceMat);
+    spine.position.set(-r * 0.1, r * 1.13, 0);
+    spine.rotation.z = 0.2;
+    seg.add(spine);
     seg.userData.baseX = -i * spacing;
     seg.position.set(seg.userData.baseX, 0, 0);
     g.add(seg);
@@ -980,78 +1047,162 @@ function makeDragon() {
   }
   g.userData.segments = segments;
 
+  // Four tiger-like legs with eagle claws make the silhouette unmistakably long.
+  const legs = [];
+  for (const [index, front] of [[3, true], [10, false]]) {
+    for (const side of [-1, 1]) {
+      const leg = makeDragonLeg(side, front);
+      leg.position.set(0, -0.2, side * 0.25);
+      segments[index].add(leg);
+      legs.push(leg);
+    }
+  }
+  g.userData.legs = legs;
+
   // ---- head (built at the +x front, ahead of segment 0) ----
   const head = new THREE.Group();
-  head.position.set(0.95, 0, 0);
-  const skull = new THREE.Mesh(new THREE.SphereGeometry(0.8, 18, 16), mat(teal));
-  skull.scale.set(1.15, 1.0, 1.0);
+  head.position.set(1.02, 0, 0);
+  const skull = new THREE.Mesh(new THREE.SphereGeometry(0.82, 20, 16), bodyMat);
+  skull.scale.set(1.18, 1.0, 0.94);
   head.add(skull);
-  const snout = new THREE.Mesh(new THREE.SphereGeometry(0.5, 14, 12), mat(teal));
-  snout.scale.set(1.5, 0.85, 0.95);
-  snout.position.set(0.8, -0.12, 0);
-  head.add(snout);
-  const nose = new THREE.Mesh(new THREE.SphereGeometry(0.5, 12, 10), mat(belly));
-  nose.scale.set(1.2, 0.55, 0.8);
-  nose.position.set(1.0, -0.28, 0);
-  head.add(nose);
-  // big grin
-  const grin = new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.06, 8, 16, Math.PI), mat(0x7a1f1f));
-  grin.position.set(0.95, -0.3, 0);
-  grin.rotation.y = Math.PI / 2;
-  head.add(grin);
+
+  const browBridge = new THREE.Mesh(new THREE.SphereGeometry(0.58, 16, 12), scaleMat);
+  browBridge.scale.set(1.45, 0.58, 1.08);
+  browBridge.position.set(0.42, 0.38, 0);
+  head.add(browBridge);
+
+  const muzzle = new THREE.Mesh(new THREE.SphereGeometry(0.56, 16, 12), scaleMat);
+  muzzle.scale.set(1.7, 0.72, 0.88);
+  muzzle.position.set(0.88, -0.05, 0);
+  head.add(muzzle);
+  const lowerJaw = new THREE.Mesh(new THREE.SphereGeometry(0.5, 14, 10), bellyMat);
+  lowerJaw.scale.set(1.55, 0.42, 0.76);
+  lowerJaw.position.set(0.9, -0.38, 0);
+  head.add(lowerJaw);
+
   for (const side of [-1, 1]) {
-    addKawaiiEye(head, 0.35, 0.42, side * 0.5, 0.26);
-    // bushy golden eyebrow
-    const brow = new THREE.Mesh(new THREE.SphereGeometry(0.2, 10, 8), goldMat);
-    brow.scale.set(1.3, 0.5, 0.7);
-    brow.position.set(0.45, 0.72, side * 0.42);
+    // Alert golden eyes under flame-shaped brows: friendly, but no longer babyish.
+    const eyeWhite = new THREE.Mesh(new THREE.SphereGeometry(0.24, 12, 10), bellyMat);
+    eyeWhite.scale.set(1.08, 0.85, 0.72);
+    eyeWhite.position.set(0.46, 0.4, side * 0.61);
+    head.add(eyeWhite);
+    const iris = new THREE.Mesh(new THREE.SphereGeometry(0.14, 10, 8), goldMat);
+    iris.position.set(0.58, 0.39, side * 0.75);
+    head.add(iris);
+    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.075, 8, 8), mat(0x13213a, { roughness: 0.25 }));
+    pupil.scale.y = 1.35;
+    pupil.position.set(0.67, 0.39, side * 0.82);
+    head.add(pupil);
+
+    const brow = curvedTube([
+      [0.12, 0.62, side * 0.55], [0.43, 0.73, side * 0.68], [0.72, 0.63, side * 0.7],
+    ], 0.07, goldMat, 10);
     head.add(brow);
-    // branching antler (deer-like, not a horn)
-    const antler = new THREE.Group();
-    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.11, 0.9, 8), goldMat);
-    beam.position.y = 0.45;
-    antler.add(beam);
-    for (const t2 of [0.35, 0.7]) {
-      const tine = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.07, 0.45, 6), goldMat);
-      tine.position.set(side * 0.12, t2, 0);
-      tine.rotation.z = side * -0.7;
-      antler.add(tine);
-    }
-    antler.position.set(-0.15, 0.72, side * 0.34);
-    antler.rotation.z = side * 0.25;
+
+    const nostril = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), mat(0x13213a));
+    nostril.position.set(1.31, 0.04, side * 0.34);
+    head.add(nostril);
+
+    const fang = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.3, 7), hornMat);
+    fang.position.set(1.1, -0.36, side * 0.38);
+    fang.rotation.z = Math.PI;
+    head.add(fang);
+
+    const ear = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.55, 6), iceMat);
+    ear.position.set(-0.32, 0.46, side * 0.72);
+    ear.rotation.x = side * -1.0;
+    ear.rotation.z = 0.35;
+    head.add(ear);
+
+    const antler = makeAntler(side);
+    antler.position.set(-0.24, 0.62, side * 0.37);
     head.add(antler);
-    // long flowing whisker
-    const whisker = new THREE.Mesh(new THREE.CapsuleGeometry(0.05, 2.4, 4, 8), mat(0xfff6d8));
-    whisker.position.set(0.9, -0.05, side * 0.4);
-    whisker.rotation.z = Math.PI / 2;
+
+    // Long moustache whiskers flow backward like ribbons in the sea.
+    const whisker = new THREE.Group();
+    whisker.add(curvedTube([
+      [1.08, -0.04, side * 0.43], [1.12, -0.18, side * 1.02],
+      [0.55, -0.34, side * 1.65], [-0.35, -0.28, side * 2.25],
+    ], 0.035, bellyMat, 18));
     whisker.userData.side = side;
+    whisker.userData.baseX = side * 0.03;
     head.add(whisker);
     if (!g.userData.whiskers) g.userData.whiskers = [];
     g.userData.whiskers.push(whisker);
   }
-  // red mane / frill collar behind the head
+
+  // A restrained mouth line, teeth and beard replace the old cartoon grin.
+  const mouthMat = mat(0x5b2731);
+  for (const side of [-1, 1]) {
+    head.add(curvedTube([
+      [0.42, -0.27, side * 0.43], [0.83, -0.31, side * 0.48], [1.27, -0.22, side * 0.36],
+    ], 0.035, mouthMat, 10));
+  }
+  for (let i = -3; i <= 3; i++) {
+    const beard = new THREE.Mesh(new THREE.ConeGeometry(0.075, 0.7 + (3 - Math.abs(i)) * 0.12, 6), i % 2 ? bellyMat : iceMat);
+    beard.position.set(0.42 - Math.abs(i) * 0.05, -0.74, i * 0.13);
+    beard.rotation.z = 0.12;
+    head.add(beard);
+  }
+
+  // Royal diadem and jade cabochon: this is a sea king, not just a dragon.
+  const diadem = new THREE.Group();
+  const band = new THREE.Mesh(new THREE.CapsuleGeometry(0.08, 0.72, 4, 8), goldMat);
+  band.rotation.x = Math.PI / 2;
+  diadem.add(band);
+  for (let i = -1; i <= 1; i++) {
+    const point = new THREE.Mesh(new THREE.ConeGeometry(0.1, i === 0 ? 0.5 : 0.35, 6), goldMat);
+    point.position.set(0, 0.24 + (i === 0 ? 0.08 : 0), i * 0.28);
+    diadem.add(point);
+  }
+  const jade = new THREE.Mesh(new THREE.SphereGeometry(0.11, 10, 8), mat(0x63e6c7, { emissive: 0x167c73, emissiveIntensity: 0.5 }));
+  jade.position.set(0.08, 0.18, 0);
+  diadem.add(jade);
+  diadem.position.set(-0.08, 0.82, 0);
+  head.add(diadem);
+
+  // Icy mane around the neck, shaped like waves and clouds rather than spikes.
   const mane = new THREE.Group();
-  for (let i = 0; i < 9; i++) {
-    const a = (i / 8) * Math.PI - Math.PI / 2;
-    const tuft = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.8, 6), mat(red));
-    tuft.position.set(-0.35, Math.cos(a) * 0.7, Math.sin(a) * 0.7);
-    tuft.rotation.z = Math.PI / 2 + 0.3;
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * Math.PI * 2;
+    const tuft = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.85, 7), i % 3 === 0 ? bellyMat : iceMat);
+    tuft.position.set(-0.5, Math.cos(a) * 0.74, Math.sin(a) * 0.74);
+    tuft.rotation.z = Math.PI / 2 + 0.22;
     tuft.rotation.x = a;
     mane.add(tuft);
   }
   head.add(mane);
   g.userData.mane = mane;
+
+  // The luminous pearl is one of the most readable traditional dragon motifs.
+  const wisdomPearl = new THREE.Mesh(
+    new THREE.SphereGeometry(0.28, 16, 12),
+    mat(0xeaffff, { emissive: 0x7ddce8, emissiveIntensity: 0.9, roughness: 0.16, metalness: 0.05 })
+  );
+  wisdomPearl.position.set(1.36, -0.93, 0);
+  head.add(wisdomPearl);
+  g.userData.pearl = wisdomPearl;
   g.add(head);
   g.userData.head = head;
 
-  // ---- flowing tail fin at the very end ----
-  const tail = makeTailFin(gold, 1.1);
-  tail.position.x = -DRAGON_SEGMENTS * spacing;
-  tail.rotation.z = Math.PI / 2; // vertical, flowing
+  // ---- cloud-like tail plume, instead of a Western wing or ordinary fish fin ----
+  const tail = new THREE.Group();
+  for (let i = -1; i <= 1; i++) {
+    const plume = new THREE.Mesh(
+      new THREE.ConeGeometry(i === 0 ? 0.16 : 0.12, i === 0 ? 1.25 : 0.95, 7),
+      i === 0 ? goldMat : iceMat
+    );
+    plume.rotation.z = Math.PI / 2;
+    plume.rotation.x = i * 0.55;
+    plume.position.set(-0.28, i * 0.2, i * 0.16);
+    tail.add(plume);
+  }
+  tail.position.x = -(DRAGON_SEGMENTS - 1) * spacing - 0.48;
+  tail.rotation.z = Math.PI;
   g.add(tail);
   g.userData.tail = tail;
 
-  g.scale.setScalar(1.35);
+  g.scale.setScalar(1.52);
   g.visible = false;
   scene.add(g);
   return g;
@@ -1063,14 +1214,41 @@ function animateDragon(t) {
   const segs = dragon.userData.segments;
   for (let i = 0; i < segs.length; i++) {
     const s = segs[i];
-    const w = i * 0.6;
+    const w = i * 0.52;
     s.position.x = s.userData.baseX;
-    s.position.z = Math.sin(t * 6 - w) * (0.35 + i * 0.05); // side-to-side ripple, bigger toward tail
-    s.position.y = Math.cos(t * 6 - w) * (0.18 + i * 0.02); // gentle vertical weave
+    s.position.z = Math.sin(t * 4.6 - w) * (0.22 + i * 0.035);
+    s.position.y = Math.cos(t * 4.6 - w) * (0.12 + i * 0.016);
   }
-  if (dragon.userData.head) dragon.userData.head.rotation.z = Math.sin(t * 6) * 0.12;
-  for (const wk of dragon.userData.whiskers) wk.rotation.x = Math.sin(t * 4 + wk.userData.side) * 0.4;
-  dragon.userData.tail.position.z = Math.sin(t * 6 - DRAGON_SEGMENTS * 0.6) * 1.0;
+  // Turn each overlapping segment into the curve tangent, removing the old
+  // string-of-beads look while keeping the lightweight procedural animation.
+  for (let i = 0; i < segs.length; i++) {
+    const prev = segs[Math.max(0, i - 1)].position;
+    const next = segs[Math.min(segs.length - 1, i + 1)].position;
+    const dx = prev.x - next.x;
+    const dy = prev.y - next.y;
+    const dz = prev.z - next.z;
+    segs[i].rotation.z = Math.atan2(dy, dx);
+    segs[i].rotation.y = -Math.atan2(dz, Math.hypot(dx, dy));
+  }
+  const first = segs[0];
+  if (dragon.userData.head) {
+    dragon.userData.head.position.y = first.position.y;
+    dragon.userData.head.position.z = first.position.z;
+    dragon.userData.head.rotation.z = first.rotation.z + Math.sin(t * 3.2) * 0.045;
+    dragon.userData.head.rotation.y = first.rotation.y;
+  }
+  for (const wk of dragon.userData.whiskers) {
+    wk.rotation.x = wk.userData.baseX + Math.sin(t * 2.7 + wk.userData.side) * 0.12;
+  }
+  dragon.userData.legs.forEach((leg, i) => {
+    leg.rotation.x = Math.sin(t * 3.4 + i * 1.7) * 0.16;
+  });
+  dragon.userData.mane.rotation.x = Math.sin(t * 2.2) * 0.08;
+  dragon.userData.pearl.scale.setScalar(1 + Math.sin(t * 5) * 0.08);
+  const last = segs[segs.length - 1];
+  dragon.userData.tail.position.y = last.position.y;
+  dragon.userData.tail.position.z = last.position.z;
+  dragon.userData.tail.rotation.y = last.rotation.y;
 }
 
 // 2nd gem: the dragon makes a grand entrance across the screen, then guards you
