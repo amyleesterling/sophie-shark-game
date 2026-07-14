@@ -1522,43 +1522,74 @@ function throwPuffer() {
 // ----------------------------- stingrays (dodge them!) -----------------------------
 // Glide past in a straight line; if one touches you, you're stunned and
 // can't swim for 3 seconds.
+const RAY_SPAN = 2.6;
 function makeStingray() {
   const g = new THREE.Group();
-  const bodyMat = mat(0x9a6bc9, { roughness: 0.7 });
-  // flat diamond body
-  const disc = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 12), bodyMat);
-  disc.scale.set(1.7, 0.28, 1.9);
-  g.add(disc);
-  const belly = new THREE.Mesh(new THREE.SphereGeometry(0.96, 18, 10), mat(0xe7d4f7));
-  belly.scale.set(1.6, 0.22, 1.8);
-  belly.position.y = -0.12;
-  g.add(belly);
-  // flapping wings (side lobes)
-  const wings = [];
-  for (const side of [-1, 1]) {
-    const wing = new THREE.Mesh(new THREE.SphereGeometry(1, 14, 8), bodyMat);
-    wing.scale.set(1.5, 0.14, 1.4);
-    wing.position.set(0, 0, side * 1.4);
-    g.add(wing);
-    wings.push({ mesh: wing, side });
-    addKawaiiEye(g, 1.05, 0.22, side * 0.32, 0.16);
+  const bodyMat = mat(0x9a6bc9, { roughness: 0.6, side: THREE.DoubleSide });
+
+  // one smooth manta silhouette: a filled outline with pointed, swept wings
+  const shape = new THREE.Shape();     // (x = forward, y = lateral)
+  const NOSE = 1.7, TAILW = 1.6, S = RAY_SPAN;
+  shape.moveTo(NOSE, 0);
+  shape.bezierCurveTo(1.5, 1.1, 0.5, 2.4, -0.3, S);    // right leading edge → wing tip
+  shape.bezierCurveTo(-1.1, 2.0, -1.5, 0.7, -TAILW, 0); // right trailing edge → tail (swept)
+  shape.bezierCurveTo(-1.5, -0.7, -1.1, -2.0, -0.3, -S); // left trailing edge
+  shape.bezierCurveTo(0.5, -2.4, 1.5, -1.1, NOSE, 0);   // left leading edge → nose
+  const geo = new THREE.ShapeGeometry(shape, 24);
+  // dome the body and record base heights + wing weights for the flap
+  const pos = geo.attributes.position;
+  const baseZ = new Float32Array(pos.count), latW = new Float32Array(pos.count);
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = pos.getY(i);
+    const dome = 0.36 * Math.max(0, 1 - (y * y) / (S * S)) * (0.55 + 0.45 * Math.max(0, 1 - Math.abs(x - 0.2) / 2));
+    baseZ[i] = dome;
+    latW[i] = Math.pow(Math.min(1, Math.abs(y) / S), 1.6);
+    pos.setZ(i, dome);
   }
-  g.userData.wings = wings;
+  geo.computeVertexNormals();
+  const surface = new THREE.Mesh(geo, bodyMat);
+  surface.rotation.x = -Math.PI / 2; // lay the membrane flat (thickness → vertical)
+  g.add(surface);
+  g.userData.surface = surface;
+  g.userData.baseZ = baseZ;
+  g.userData.latW = latW;
+
+  // pale belly ridge down the middle so it reads as solid from the side
+  const spine = new THREE.Mesh(new THREE.CapsuleGeometry(0.28, 2.0, 6, 10), mat(0xe7d4f7));
+  spine.rotation.z = Math.PI / 2;
+  spine.scale.set(1, 1, 0.5);
+  spine.position.set(-0.1, 0.05, 0);
+  g.add(spine);
+
+  for (const side of [-1, 1]) addKawaiiEye(g, 1.05, 0.4, side * 0.34, 0.16);
+
   // long whippy tail with a stinger
   for (let i = 0; i < 5; i++) {
     const seg = new THREE.Mesh(new THREE.CylinderGeometry(0.12 - i * 0.02, 0.14 - i * 0.02, 0.7, 6), bodyMat);
     seg.rotation.z = Math.PI / 2;
-    seg.position.set(-1.4 - i * 0.6, 0, 0);
+    seg.position.set(-1.6 - i * 0.6, 0, 0);
     g.add(seg);
   }
   const stinger = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.5, 6), mat(0xffe066));
   stinger.rotation.z = Math.PI / 2;
-  stinger.position.set(-4.5, 0, 0);
+  stinger.position.set(-4.7, 0, 0);
   g.add(stinger);
-  g.scale.setScalar(1.15);
+
   g.visible = false;
   scene.add(g);
   return g;
+}
+
+// flap the whole membrane — wing tips rise and fall smoothly
+function flapStingray(g, t, phase) {
+  const surf = g.userData.surface, baseZ = g.userData.baseZ, latW = g.userData.latW;
+  const pos = surf.geometry.attributes.position;
+  const wave = Math.sin(t * 3 + phase);
+  for (let i = 0; i < pos.count; i++) {
+    pos.setZ(i, baseZ[i] + wave * 0.95 * latW[i]);
+  }
+  pos.needsUpdate = true;
+  surf.geometry.computeVertexNormals();
 }
 const stingrays = [];
 for (let i = 0; i < 2; i++) stingrays.push({ mesh: makeStingray(), active: false, vel: new THREE.Vector3(), phase: rand(0, 6.28) });
@@ -2274,7 +2305,7 @@ function animate() {
       const m = r.mesh;
       m.position.addScaledVector(r.vel, dt);
       m.position.y = clamp(m.position.y, floorY(m.position.x, m.position.z) + 2, CEILING_Y - 1) + Math.sin(t * 1.5 + r.phase) * dt * 0.4;
-      for (const w of m.userData.wings) w.mesh.rotation.x = Math.sin(t * 3 + r.phase) * 0.5 * w.side; // flap
+      flapStingray(m, t, r.phase); // undulate the whole wing membrane
       // sting on contact (not while invulnerable or already dizzy)
       if (!stung && state.invulnerable <= 0 && player.position.distanceTo(m.position) < 2.8) {
         state.stungTimer = 3;
